@@ -1,6 +1,6 @@
 #include <stdio.h>
-#include "src/keyboard.h"
-#include "lib/include/interface.h"
+#include "keyboard.h"
+#include "interface.h"
 #include <time.h>
 
 

@@ -1,21 +1,37 @@
 cmake_minimum_required(VERSION 3.10)
-project(sdk_demo C CXX)
-set(CMAKE_CXX_STANDARD 17)
 
-include_directories(${CMAKE_SOURCE_DIR})
+project(UEM_RobotDog LANGUAGES C CXX)
 
-file(GLOB SRC_FILE 
-	"src/*.cpp"
+add_subdirectory(lib/astrall_sdk)
+
+add_executable(sdk_demo)
+
+target_sources(sdk_demo
+    PRIVATE
+        src/main.cpp
+        src/keyboard.cpp
 )
 
-include_directories(sdk_demo PRIVATE 
-	src
-	lib/include
+target_compile_features(sdk_demo PRIVATE cxx_std_17)
+
+target_include_directories(sdk_demo
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-add_executable(sdk_demo ${SRC_FILE})
+find_package(Threads REQUIRED)
 
-target_link_libraries(sdk_demo 
-        -pthread
-	${CMAKE_SOURCE_DIR}/lib/libASTRALL_SDK.so
+target_link_libraries(sdk_demo
+    PRIVATE
+        astrall::sdk
+        Threads::Threads
 )
+
+foreach(runtime_file IN LISTS ASTRALL_SDK_RUNTIME_FILES)
+    add_custom_command(TARGET sdk_demo POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${runtime_file}
+            $<TARGET_FILE_DIR:sdk_demo>
+        COMMENT "Copying Astrall SDK runtime: ${runtime_file}"
+    )
+endforeach()

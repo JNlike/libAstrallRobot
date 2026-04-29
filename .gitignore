@@ -23,6 +23,13 @@
 *.dll
 *.so.*
 
+# Vendored Astrall SDK runtime libraries.
+!lib/astrall_sdk/
+!lib/astrall_sdk/arm64/
+!lib/astrall_sdk/arm64/libASTRALL_SDK.so*
+!lib/astrall_sdk/x86-64/
+!lib/astrall_sdk/x86-64/libASTRALL_SDK.so*
+
 
 # Fortran module files
 *.mod
