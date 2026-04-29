@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 
-project(UEM_RobotDog LANGUAGES C CXX)
+project(Astrall_RobotDog_Cpp LANGUAGES C CXX)
 
 add_subdirectory(lib/astrall_sdk)
 
