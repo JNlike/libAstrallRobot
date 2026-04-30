@@ -1,0 +1,29 @@
+robot:
+  backend: sim
+
+backend:
+  sim:
+    dt: 0.02
+  real:
+    port: /dev/ttyUSB0
+    baudrate: 115200
+
+controller:
+  max_v: 1.0
+  max_w: 1.0
+  position_tolerance: 0.1
+  angle_tolerance: 0.1
+
+planner:
+  type: straight_line
+  waypoint_count: 20
+
+camera:
+  type: dummy
+  width: 640
+  height: 480
+  channels: 3
+
+radar:
+  type: dummy
+  point_count: 1024

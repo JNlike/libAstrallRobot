@@ -1,86 +1,127 @@
-[English](README.md) | [中文](docs/README.zh-CN.md) | [日本語](docs/README.ja.md) | [Français](docs/README.fr.md) | [Deutsch](docs/README.de.md)
+# Astrall Robot Runtime
 
-# Astrall RobotDog Cpp
+Astrall is a minimal modern C++20 robot runtime for factory inspection robots. The core runtime is written in C++, while Python calls it through the `astrall` pybind11 module.
 
-A C++17 demo project for controlling an Astrall robot dog with the Astrall SDK.
-
-This project shows how to initialize the SDK, subscribe to robot telemetry, read device and power status, send heartbeat messages, and control robot movement from the keyboard.
-
-## Features
-
-- CMake-based C++ project structure.
-- Astrall SDK integration through `lib/astrall_sdk`.
-- Keyboard command handling for sport modes, movement, authorization, and lights.
-- IMU and sport data subscriptions.
-- Periodic heartbeat, device information, system status, sport status, and battery status output.
-- Runtime SDK library copying after build.
-
-## Project Structure
+## Architecture
 
 ```text
-.
-├── CMakeLists.txt
-├── src/
-│   ├── main.cpp
-│   ├── keyboard.cpp
-│   └── keyboard.h
-├── lib/
-│   └── astrall_sdk/
-│       ├── include/
-│       ├── x86-64/
-│       └── arm64/
-└── docs/
+Python
+  |
+  v
+astrall pybind11 module
+  |
+  v
+Runtime::fromConfig(configs/robot.yaml)
+  |
+  +--> Backend <----------+
+  |                       |
+  +--> Controller --------+
+  |                       |
+  +--> Planner --> Navigator --> StateMachine
+  |
+  +--> Camera
+  |
+  +--> Radar
 ```
 
-## Requirements
+Design principles:
 
-- Linux environment
-- CMake 3.10 or newer
-- C++17-compatible compiler
-- POSIX thread support
-- Astrall robot dog and compatible Astrall SDK runtime
+- Python calls the runtime.
+- C++ manages lifecycle and hardware abstractions.
+- `Runtime` owns and shares the system objects.
+- `config.yaml` selects concrete implementations.
+
+## Dependencies
+
+- C++20 compiler
+- CMake 3.20+
+- Python 3
+- pybind11
+- yaml-cpp
+- numpy for Python tests and demos
+
+Ubuntu:
+
+```bash
+sudo apt install cmake g++ pybind11-dev libyaml-cpp-dev python3-numpy
+```
+
+Alternative package managers such as vcpkg or conda can also provide `pybind11` and `yaml-cpp`.
 
 ## Build
 
 ```bash
-cmake -S . -B build
-cmake --build build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
 ```
 
-The executable is generated as `sdk_demo`. The required Astrall SDK runtime libraries are copied to the executable directory after the build.
+## Python Usage
 
-## Run
+Set `PYTHONPATH` to the directory containing the compiled `astrall` extension.
+
+Linux/macOS single-config example:
 
 ```bash
-./build/sdk_demo
+PYTHONPATH=build python examples/python_demo.py
 ```
 
-Run the program in a terminal connected to the robot environment. The demo reads keyboard input directly from standard input.
+Windows multi-config example:
 
-## Keyboard Controls
+```powershell
+$env:PYTHONPATH="build\Release"
+python examples\python_demo.py
+```
 
-| Key | Action |
-| --- | --- |
-| `1` | Switch to damping mode |
-| `2` | Switch to fixed stand mode |
-| `3` | Switch to fixed down mode |
-| `4` | Switch to move mode |
-| `5` | Start auto charge |
-| `6` | Exit charge |
-| `9` | Request SDK control authority |
-| `0` | Stop movement |
-| `w` / `s` | Increase / decrease forward velocity |
-| `a` / `d` | Increase / decrease lateral velocity |
-| `q` / `e` | Increase / decrease yaw velocity |
-| `n` | Turn light on |
-| `o` | Turn light off |
+Python API example:
 
-Movement keys only take effect when the robot is in move mode.
+```python
+import astrall as al
+
+rt = al.from_config("configs/robot.yaml")
+
+img = rt.camera().get_frame()
+cloud = rt.radar().get_pointcloud()
+
+sm = rt.state_machine()
+sm.start_mission([
+    al.Point2D(1.0, 0.0),
+    al.Point2D(2.0, 1.0),
+])
+
+while sm.running():
+    sm.update()
+```
+
+## C++ Demo
+
+```bash
+cmake --build build --target astrall_cpp_demo --config Release
+./build/astrall_cpp_demo
+```
+
+On Windows multi-config generators:
+
+```powershell
+.\build\Release\astrall_cpp_demo.exe
+```
+
+## Tests
+
+After building the Python extension:
+
+```bash
+PYTHONPATH=build pytest tests/smoke_test.py
+```
+
+On Windows:
+
+```powershell
+$env:PYTHONPATH="build\Release"
+pytest tests\smoke_test.py
+```
 
 ## Notes
 
-Use this demo carefully in a safe, open area. Confirm that the robot has SDK control authority and enough free space before enabling movement.
-
-## License
-
-See [LICENSE](LICENSE).
+- Do not repeatedly construct real hardware devices from Python. Prefer `Runtime.from_config()` so hardware handles are shared and owned in one place.
+- Device data is copied into numpy arrays in this first version. A future zero-copy path should define explicit ownership and lifetime rules.
+- `RealBackend` is a placeholder that prints commands; it does not connect to physical hardware yet.
