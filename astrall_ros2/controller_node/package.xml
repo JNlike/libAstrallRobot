@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>astrall_base_driver</name>
+  <version>0.1.0</version>
+  <description>ROS2 base driver for Astrall chassis control and robot-state bridging.</description>
+  <maintainer email="maintainer@example.com">Astrall Maintainers</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>diagnostic_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
