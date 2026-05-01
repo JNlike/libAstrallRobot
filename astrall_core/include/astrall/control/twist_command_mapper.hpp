@@ -7,16 +7,16 @@ namespace astrall {
 struct VelocityLimits {
     double max_vx = 1.0;
     double max_vy = 1.0;
-    double max_wz = 1.0;
+    double max_w = 1.0;
 };
 
 struct TwistMappingConfig {
     double scale_vx = 1.0;
     double scale_vy = 1.0;
-    double scale_wz = 1.0;
+    double scale_w = 1.0;
     int sign_vx = 1;
     int sign_vy = 1;
-    int sign_wz = 1;
+    int sign_w = 1;
 };
 
 Twist2D clampTwist(const Twist2D& cmd, const VelocityLimits& limits);

@@ -32,6 +32,7 @@ void StateMachine::update() {
         if (nav_status == NavStatus::Reached) {
             state_ = RobotState::Inspect;
         } else if (nav_status == NavStatus::Blocked || nav_status == NavStatus::Failed) {
+            // Blocked is reserved for future obstacle-aware navigation.
             state_ = RobotState::Error;
         }
     }
@@ -51,6 +52,7 @@ bool StateMachine::running() const {
     return state_ == RobotState::Init ||
            state_ == RobotState::Navigate ||
            state_ == RobotState::Inspect ||
+           // ReturnHome is reserved for a future mission flow.
            state_ == RobotState::ReturnHome;
 }
 

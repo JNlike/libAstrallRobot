@@ -7,6 +7,7 @@ namespace astrall {
 struct Twist2D {
     double vx = 0.0;
     double vy = 0.0;
+    // Angular velocity around the z axis, in radians per second.
     double w = 0.0;
 
     Twist2D() = default;

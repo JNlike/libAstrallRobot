@@ -1,0 +1,304 @@
+下面这段可以直接给 Codex。目标不是让它“大重构”，而是让它**先收敛接口契约，再做最小必要修改**。
+
+````text
+你正在维护一个名为 astrall 的现代 C++/Python/ROS2 巡检机器人项目。项目核心抽象包括 Planner / Controller / Navigator / StateMachine / Backend / Runtime，并通过 pybind11 暴露为 Python module，同时有 ROS2 节点接入真实 SDK。
+
+请不要进行大规模架构重写。请基于现有代码做一次接口收敛和最小修复，重点解决以下不一致点。
+
+## 背景结论
+
+当前代码不是全面混乱。核心 Planner / Controller / Navigator / StateMachine 的职责边界整体可接受，但存在一些接口设计未收敛点：
+
+1. 角速度命名不统一：
+   - Twist2D 使用 `w`
+   - SDK wrapper tuple-style 接口使用 `wz`
+   - 底层 SDK Velocity 使用 `yaw`
+   - 文档/ROS 侧出现 `vyaw`
+   涉及文件：
+   - `geometry.hpp`
+   - `astrall_sdk_wrapper.hpp`
+   - `astrall_sdk_wrapper.cpp`
+   - `astrall_base_node.cpp`
+
+2. SDK 控制接口同时存在强类型和 tuple-style：
+   - `AstrallSdkWrapper::move(double vx, double vy, double wz)`
+   - `AstrallSdkWrapper::move(const Twist2D&)`
+   项目规范倾向于 `Twist2D` 这种强领域类型。tuple-style 容易造成参数顺序和语义歧义。
+
+3. Runtime 的 `real` backend 与真实 SDK 控制路径不一致：
+   - `Runtime::fromConfig()` 中 `backend: real` 创建的是 `RealBackend`
+   - `RealBackend` 当前只打印命令，没有接真实 Astrall SDK
+   - 真正的 SDK 控制路径在 ROS2 `AstrallBaseNode -> AstrallSdkWrapper`
+   这导致 `Runtime` 看起来支持真实硬件，但实际硬件控制绕过了 Backend/Runtime 抽象。
+   涉及文件：
+   - `runtime.cpp`
+   - `real_backend.cpp`
+   - `astrall_base_node.cpp`
+
+4. 部分 ROS2 参数语义不完整：
+   - `control_mode` 只影响是否调用 `requestControl()`，但 `onCmdVel()` 仍会调用 `sdk_.move()`
+   - `sdk_ip` / `robot_ip` 目前只是配置/诊断信息，SDK 当前没有真正设置 IP 的接口
+   - `publish_tf` 被声明但明确不发布 TF
+   涉及文件：
+   - `astrall_base_node.cpp`
+
+5. C++ 与 Python 暴露面不完全对齐：
+   - C++ `Controller` 有带控制参数的构造函数
+   - Python binding 只暴露了 `Controller(backend)`
+   - `ImageFrame` / `PointCloud` 类型被暴露，但 Python 的 `get_frame()` / `get_pointcloud()` 返回 numpy array，不返回这些领域对象
+   这可能是有意设计，但需要明确 API 契约。
+   涉及文件：
+   - `controller.hpp`
+   - `bind_control.cpp`
+   - `bind_device.cpp`
+
+6. 状态枚举比实际状态机能力更大：
+   - `NavStatus::Blocked` / `NavStatus::Failed` 被 `StateMachine` 消费，但 `Navigator` 当前从不产生
+   - `RobotState::ReturnHome` 存在但没有转移逻辑
+   涉及文件：
+   - `status.hpp`
+   - `navigator.cpp`
+   - `state_machine.cpp`
+
+## 修改目标
+
+请完成以下任务：
+
+### 任务 1：统一运动命令角速度命名
+
+请在整个项目中统一二维速度命令的角速度字段命名。优先选择一个清晰、机器人领域常用、语义稳定的名称，例如：
+
+- `omega`
+- 或 `wz`
+
+如果项目中已有 `Twist2D { vx, vy, w }`，可以保留 `w`，但必须通过注释或文档明确其含义是绕 z 轴角速度。
+
+要求：
+- 不要让 `w`、`wz`、`yaw`、`vyaw` 在同一 API 层同时作为同一概念出现。
+- 底层 SDK 如果必须使用 `yaw` 字段，可以只在 SDK adapter 内部做映射。
+- 外部业务层、Controller、Navigator、Python API、ROS2 callback 应尽量使用统一命名或统一领域对象。
+
+重点检查：
+- `geometry.hpp`
+- `astrall_sdk_wrapper.hpp`
+- `astrall_sdk_wrapper.cpp`
+- `astrall_base_node.cpp`
+
+### 任务 2：收敛 SDK wrapper 的 move 接口
+
+请优先保留强类型接口：
+
+```cpp
+void move(const Twist2D& twist);
+````
+
+如果确实需要保留 tuple-style 接口：
+
+```cpp
+void move(double vx, double vy, double wz);
+```
+
+请将它降级为兼容便利接口，并让它内部构造 `Twist2D` 后转发到强类型接口。请避免两套实现逻辑并存。
+
+目标是让真实控制路径最终以 `Twist2D` 为核心命令对象。
+
+### 任务 3：理清 Runtime real backend 与 ROS2 SDK 控制路径
+
+当前 `Runtime::fromConfig()` 的 `backend: real` 创建的是 `RealBackend`，但 `RealBackend` 只打印命令。真实 SDK 控制路径在 ROS2 节点中。
+
+请提出并实现一个最小一致方案，优先考虑以下两种方案之一：
+
+方案 A：让 `RealBackend` 真正接入 `AstrallSdkWrapper`
+
+* `Runtime` 的 `backend: real` 真正意味着控制真实硬件；
+* `RealBackend` 内部组合 SDK wrapper；
+* ROS2 节点也尽量复用同一套 backend 或 wrapper。
+
+方案 B：明确区分 `MockBackend` / `LoggingBackend` / `SdkBackend`
+
+* 如果当前 `RealBackend` 只是打印命令，请不要叫 `RealBackend`；
+* 将其改名或重新定义语义；
+* 真实 SDK 控制路径用明确的 `SdkBackend` 或 `AstrallBackend` 表达。
+
+请优先选择改动小、语义清晰、不会破坏现有编译结构的方案。
+修改前请先阅读相关 CMake / include 依赖，避免 ROS2 包和纯 C++ core 包发生不必要耦合。
+
+重点检查：
+
+* `runtime.cpp`
+* `real_backend.hpp`
+* `real_backend.cpp`
+* `astrall_sdk_wrapper.hpp`
+* `astrall_sdk_wrapper.cpp`
+* `astrall_base_node.cpp`
+* CMakeLists.txt / package.xml，如果相关
+
+### 任务 4：修正或明确 ROS2 参数语义
+
+请检查 `AstrallBaseNode` 中以下参数：
+
+* `control_mode`
+* `sdk_ip`
+* `robot_ip`
+* `publish_tf`
+
+要求：
+
+* 如果 `control_mode` 表示是否接管控制，那么在未接管时，`onCmdVel()` 不应继续下发运动命令，或者必须明确其语义不是控制开关。
+* 如果 `sdk_ip` / `robot_ip` 当前不能真正传入 SDK，请在日志和注释中明确说明它们目前只是配置占位或诊断字段。
+* 如果 `publish_tf` 不实现，请不要给出会误导用户的参数；要么删除，要么保留但打印明确 warning。
+
+重点检查：
+
+* `astrall_base_node.cpp`
+* ROS2 launch/config 文件，如果存在
+
+### 任务 5：统一或说明 Python API 暴露面
+
+请检查 pybind11 binding：
+
+* `bind_control.cpp`
+* `bind_device.cpp`
+* `controller.hpp`
+* `camera.hpp`
+* `radar.hpp`
+* `geometry.hpp`
+
+需要判断并处理：
+
+1. `Controller` 的 Python 构造函数是否应该暴露与 C++ 一致的控制参数版本。
+2. `ImageFrame` / `PointCloud` 是否应该作为 Python 领域对象返回。
+3. 如果 Python API 设计为直接返回 numpy array，请在 binding 或文档中明确：
+
+   * C++ 层使用领域对象；
+   * Python 层为了易用性返回 numpy；
+   * `ImageFrame` / `PointCloud` 是否仅作为类型占位、未来扩展，还是应该删除暴露。
+
+请不要盲目增加 API。优先保证 API 契约清晰。
+
+### 任务 6：状态枚举与状态机能力对齐
+
+请检查：
+
+* `status.hpp`
+* `navigator.cpp`
+* `state_machine.cpp`
+
+需要处理：
+
+1. `NavStatus::Blocked` / `NavStatus::Failed` 是否应该由 `Navigator` 在某些条件下产生。
+2. 如果当前没有障碍检测、路径失败、规划失败逻辑，请不要让 `StateMachine` 消费永远不会出现的状态，除非有明确 TODO。
+3. `RobotState::ReturnHome` 如果保留，应补充最小转移逻辑或标注为未实现。
+4. 不要让枚举看起来功能齐全，但实际状态机不可达。
+
+## 代码风格要求
+
+* 优先小步修改，不做大规模重写。
+* 保持现有命名风格、目录结构和 CMake 结构。
+* 不要引入沉重依赖。
+* 不要破坏 Python module 名称 `astrall`。
+* 不要破坏 ROS2 节点的基本启动方式。
+* 对兼容性接口加注释，说明其用途和未来迁移方向。
+* 修改后请更新必要的文档或注释。
+
+## 验证要求
+
+完成修改后，请至少尝试：
+
+1. 编译 C++ core。
+2. 编译 pybind11 module。
+3. 如果环境支持，编译 ROS2 package。
+4. 如果已有测试，请运行测试。
+5. 如果没有测试，请至少补充轻量级 smoke test 或说明无法测试的原因。
+
+请在最终回答中给出：
+
+1. 修改了哪些文件。
+2. 每个修改点解决了哪个接口不一致问题。
+3. 是否保留了兼容接口。
+4. 是否有行为改变。
+5. 构建/测试结果。
+6. 仍需人工确认的问题。
+
+````
+
+---
+
+## 你需要重点审查的代码
+
+### 第一优先级：会影响真实硬件控制路径
+
+| 文件 | 审查重点 | 原因 |
+|---|---|---|
+| `runtime.cpp` | `Runtime::fromConfig()` 如何选择 backend | 这里决定 `backend: real` 到底是不是硬件入口 |
+| `real_backend.hpp/.cpp` | `RealBackend` 是否只是打印 | 如果只是打印，命名会误导后续开发 |
+| `astrall_sdk_wrapper.hpp/.cpp` | SDK 控制接口、`move()` 重载、角速度映射 | 这是强类型命令和真实 SDK 的边界 |
+| `astrall_base_node.cpp` | ROS2 `cmd_vel` 到 SDK 的控制路径 | 目前真实硬件控制大概率在这里发生 |
+
+这组代码要最先审查，因为它决定了项目到底是：
+
+```text
+Runtime -> Backend -> SDK
+````
+
+还是：
+
+```text
+ROS2 Node -> SDK Wrapper
+```
+
+如果这个入口不收敛，后面 Controller / Planner / StateMachine 再漂亮也可能只是“架构摆设”。
+
+---
+
+### 第二优先级：运动命令领域对象
+
+| 文件                    | 审查重点                          |
+| --------------------- | ----------------------------- |
+| `geometry.hpp`        | `Twist2D` 字段命名和注释             |
+| `controller.hpp/.cpp` | Controller 是否全程使用 `Twist2D`   |
+| `planner.hpp/.cpp`    | Planner 输出是否与 Controller 输入一致 |
+| `navigator.hpp/.cpp`  | Navigator 是否把路径/速度状态表达清楚      |
+| `status.hpp`          | 速度、状态、导航结果的枚举是否过度设计           |
+
+你要看的是：
+**是否所有运动控制最终都能收敛为同一种命令对象。**
+
+理想状态：
+
+```cpp
+Planner -> Navigator -> Controller -> Backend -> SDK
+```
+
+中间不要一会儿传：
+
+```cpp
+double vx, double vy, double wz
+```
+
+一会儿传：
+
+```cpp
+Twist2D{vx, vy, w}
+```
+
+一会儿又映射成：
+
+```cpp
+Velocity.yaw
+```
+
+底层 SDK 可以叫 `yaw`，但业务层最好不要扩散这个命名。
+
+---
+
+### 第三优先级：Python 暴露面
+
+| 文件                         | 审查重点                               |
+| -------------------------- | ---------------------------------- |
+| `bind_control.cpp`         | `Controller` 暴露是否和 C++ 构造能力一致      |
+| `bind_device.cpp`          | `Camera` / `Radar` 返回 numpy 还是领域对象 |
+| `controller.hpp`           | C++ 构造函数和 Python binding 是否有意不一致   |
+| `camera.hpp` / `radar.hpp` | `ImageFrame` / `PointCloud` 的职责    |
+| `geometry.hpp`             | Python 是否也应暴露 `Twist2D`            |
+

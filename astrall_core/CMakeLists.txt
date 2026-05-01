@@ -33,6 +33,7 @@ else()
 endif()
 
 set(ASTRALL_CORE_SOURCES
+    src/backend/backend_factory.cpp
     src/backend/sim_backend.cpp
     src/backend/real_backend.cpp
     src/control/controller.cpp
@@ -48,12 +49,13 @@ set(ASTRALL_CORE_SOURCES
 set(ASTRALL_CORE_LIBS
     ${ASTRALL_YAML_TARGET}
 )
+set(ASTRALL_CORE_PRIVATE_LIBS)
 
 if(ASTRALL_ENABLE_SDK)
     list(APPEND ASTRALL_CORE_SOURCES
         src/sdk/astrall_sdk_wrapper.cpp
     )
-    list(APPEND ASTRALL_CORE_LIBS
+    list(APPEND ASTRALL_CORE_PRIVATE_LIBS
         astrall::sdk
     )
 endif()
@@ -68,8 +70,9 @@ target_include_directories(astrall_core
 )
 
 target_link_libraries(astrall_core
-    PUBLIC
+    PRIVATE
         ${ASTRALL_CORE_LIBS}
+        ${ASTRALL_CORE_PRIVATE_LIBS}
 )
 
 if(ASTRALL_ENABLE_SDK)
@@ -89,4 +92,12 @@ if(ASTRALL_BUILD_TESTS)
     add_executable(astrall_twist_mapper_test tests/test_twist_command_mapper.cpp)
     target_link_libraries(astrall_twist_mapper_test PRIVATE astrall_core)
     add_test(NAME astrall_twist_mapper_test COMMAND astrall_twist_mapper_test)
+
+    add_executable(astrall_navigator_status_test tests/test_navigator_status.cpp)
+    target_link_libraries(astrall_navigator_status_test PRIVATE astrall_core)
+    add_test(NAME astrall_navigator_status_test COMMAND astrall_navigator_status_test)
+
+    add_executable(astrall_backend_interface_test tests/test_backend_interface.cpp)
+    target_link_libraries(astrall_backend_interface_test PRIVATE astrall_core)
+    add_test(NAME astrall_backend_interface_test COMMAND astrall_backend_interface_test)
 endif()

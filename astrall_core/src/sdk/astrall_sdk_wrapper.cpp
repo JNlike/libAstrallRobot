@@ -53,8 +53,8 @@ bool AstrallSdkWrapper::releaseControl() {
     return succeededAndRemember(client_->set_auth(Auth::joystick, timeoutFrom(config_.command_timeout_ms)));
 }
 
-bool AstrallSdkWrapper::move(double vx, double vy, double wz) {
-    return move(Twist2D{vx, vy, wz});
+bool AstrallSdkWrapper::move(double vx, double vy, double w) {
+    return move(Twist2D{vx, vy, w});
 }
 
 bool AstrallSdkWrapper::move(const Twist2D& cmd) {

@@ -4,8 +4,7 @@
 
 #include <yaml-cpp/yaml.h>
 
-#include "astrall/backend/real_backend.hpp"
-#include "astrall/backend/sim_backend.hpp"
+#include "astrall/backend/backend_factory.hpp"
 #include "astrall/device/dummy_camera.hpp"
 #include "astrall/device/dummy_radar.hpp"
 #include "astrall/planning/straight_line_planner.hpp"
@@ -28,17 +27,20 @@ std::shared_ptr<Runtime> Runtime::fromConfig(const std::string& config_path) {
     YAML::Node config = YAML::LoadFile(config_path);
     auto runtime = std::shared_ptr<Runtime>(new Runtime());
 
-    const std::string backend_type = getOr(config["robot"], "backend", std::string("sim"));
-    if (backend_type == "sim") {
-        const double dt = getOr(config["backend"]["sim"], "dt", 0.02);
-        runtime->backend_ = std::make_shared<SimBackend>(dt);
-    } else if (backend_type == "real") {
-        const std::string port = getOr(config["backend"]["real"], "port", std::string("/dev/ttyUSB0"));
-        const int baudrate = getOr(config["backend"]["real"], "baudrate", 115200);
-        runtime->backend_ = std::make_shared<RealBackend>(port, baudrate);
-    } else {
-        throw std::runtime_error("Unsupported backend type: " + backend_type);
-    }
+    BackendFactoryConfig backend_config;
+    backend_config.kind = backendKindFromString(getOr(config["robot"], "backend", std::string("sim")));
+    backend_config.sim_dt = getOr(config["backend"]["sim"], "dt", backend_config.sim_dt);
+
+    const YAML::Node real_config = config["backend"]["real"];
+    backend_config.real.sdk_ip = getOr(real_config, "sdk_ip", backend_config.real.sdk_ip);
+    backend_config.real.robot_ip = getOr(real_config, "robot_ip", backend_config.real.robot_ip);
+    backend_config.real.init_timeout_ms = getOr(real_config, "init_timeout_ms", backend_config.real.init_timeout_ms);
+    backend_config.real.command_timeout_ms = getOr(real_config, "command_timeout_ms", backend_config.real.command_timeout_ms);
+    backend_config.real.imu_frequency_hz = getOr(real_config, "imu_frequency_hz", backend_config.real.imu_frequency_hz);
+    backend_config.real.sport_frequency_hz = getOr(real_config, "sport_frequency_hz", backend_config.real.sport_frequency_hz);
+    backend_config.real.sdk_quaternion_order = getOr(real_config, "sdk_quaternion_order", backend_config.real.sdk_quaternion_order);
+    backend_config.real.request_control = getOr(real_config, "request_control", backend_config.real.request_control);
+    runtime->backend_ = createBackend(backend_config);
 
     const YAML::Node controller_config = config["controller"];
     runtime->controller_ = std::make_shared<Controller>(

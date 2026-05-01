@@ -17,9 +17,15 @@ Navigator::Navigator(std::shared_ptr<Planner> planner,
 }
 
 void Navigator::setGoal(const Point2D& goal) {
-    path_ = planner_->plan(backend_->getCurrentPose(), goal);
-    current_index_ = 0;
-    status_ = path_.waypoints.empty() ? NavStatus::Reached : NavStatus::Running;
+    try {
+        path_ = planner_->plan(backend_->getCurrentPose(), goal);
+        current_index_ = 0;
+        status_ = path_.waypoints.empty() ? NavStatus::Reached : NavStatus::Running;
+    } catch (...) {
+        path_.waypoints.clear();
+        current_index_ = 0;
+        status_ = NavStatus::Failed;
+    }
 }
 
 NavStatus Navigator::update() {

@@ -12,6 +12,9 @@ def test_smoke():
     assert cloud.shape == (1024, 4)
     assert cloud.dtype.name == "float32"
 
+    controller = al.Controller(rt.backend(), 1.0, 1.0, 0.1, 0.1)
+    controller.stop()
+
     sm = rt.state_machine()
     sm.start_mission([
         al.Point2D(1.0, 0.0),

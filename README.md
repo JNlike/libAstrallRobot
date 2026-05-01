@@ -41,7 +41,7 @@ Design principles:
 Nav2 /cmd_vel
   |
   v
-astrall_ros2/controller_node --> AstrallSdkWrapper --> AstrallMove(vx, vy, vyaw)
+astrall_ros2/controller_node --> astrall_core Backend --> RealBackend --> Astrall SDK
   |
   +--> /astrall/imu
   +--> /astrall/wheel_speeds
@@ -151,6 +151,7 @@ pytest astrall_core\tests\smoke_test.py
 ## Notes
 
 - Do not repeatedly construct real hardware devices from Python. Prefer `Runtime.from_config()` so hardware handles are shared and owned in one place.
-- Device data is copied into numpy arrays in this first version. A future zero-copy path should define explicit ownership and lifetime rules.
-- `RealBackend` is a placeholder that prints commands; it does not connect to physical hardware yet.
+- C++ device interfaces use `ImageFrame` and `PointCloud`; Python `get_frame()` and `get_pointcloud()` return copied numpy arrays for convenience. A future zero-copy path should define explicit ownership and lifetime rules.
+- `RealBackend` is SDK-backed when `ASTRALL_ENABLE_SDK=ON`. `backend: real` initializes the Astrall SDK and requests control by default; use only in a safe hardware environment.
+- `sdk_ip` and `robot_ip` document the expected network and diagnostics. The current Astrall C API does not expose IP setters.
 - See `docs/astrall_ros2_architecture.md` for the ROS2 base-driver, LiDAR-driver, localization, Nav2, and test plan.

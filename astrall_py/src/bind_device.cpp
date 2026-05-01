@@ -35,7 +35,10 @@ py::array_t<float> cloudToNumpy(const astrall::PointCloud& cloud) {
 }  // namespace
 
 void bind_device(py::module_& m) {
-    py::class_<astrall::ImageFrame>(m, "ImageFrame")
+    py::class_<astrall::ImageFrame>(
+        m,
+        "ImageFrame",
+        "C++ camera frame domain object. Camera.get_frame() returns a copied numpy array for Python convenience.")
         .def(py::init<>())
         .def_readwrite("width", &astrall::ImageFrame::width)
         .def_readwrite("height", &astrall::ImageFrame::height)
@@ -45,7 +48,7 @@ void bind_device(py::module_& m) {
     py::class_<astrall::Camera, std::shared_ptr<astrall::Camera>>(m, "Camera")
         .def("get_frame", [](astrall::Camera& camera) {
             return frameToNumpy(camera.getFrame());
-        });
+        }, "Return a copied numpy uint8 array with shape (height, width, channels).");
 
     py::class_<astrall::DummyCamera, astrall::Camera, std::shared_ptr<astrall::DummyCamera>>(m, "DummyCamera")
         .def(py::init<int, int, int>(), py::arg("width") = 640, py::arg("height") = 480, py::arg("channels") = 3);
@@ -57,14 +60,17 @@ void bind_device(py::module_& m) {
         .def_readwrite("z", &astrall::PointXYZI::z)
         .def_readwrite("intensity", &astrall::PointXYZI::intensity);
 
-    py::class_<astrall::PointCloud>(m, "PointCloud")
+    py::class_<astrall::PointCloud>(
+        m,
+        "PointCloud",
+        "C++ point-cloud domain object. Radar.get_pointcloud() returns a copied numpy array for Python convenience.")
         .def(py::init<>())
         .def_readwrite("points", &astrall::PointCloud::points);
 
     py::class_<astrall::Radar, std::shared_ptr<astrall::Radar>>(m, "Radar")
         .def("get_pointcloud", [](astrall::Radar& radar) {
             return cloudToNumpy(radar.getPointCloud());
-        }, "Return a simulation/demo point cloud. Production LiDAR must use a ROS2 driver.");
+        }, "Return a copied numpy float32 array with shape (point_count, 4). Production LiDAR must use a ROS2 driver.");
 
     py::class_<astrall::DummyRadar, astrall::Radar, std::shared_ptr<astrall::DummyRadar>>(m, "DummyRadar")
         .def(py::init<int>(), py::arg("point_count") = 1024);

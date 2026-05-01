@@ -17,8 +17,8 @@ CameraNode
 
 ControllerNode
   astrall_ros2/controller_node, packaged as astrall_base_driver for now.
-  Subscribes /cmd_vel, clamps/maps Twist, calls AstrallMove, and publishes SDK IMU,
-  wheel speeds, robot status, and diagnostics.
+  Subscribes /cmd_vel, clamps/maps Twist, sends commands through astrall_core Backend,
+  and publishes Backend IMU, wheel speeds, robot status, and diagnostics.
 
 OdomNode
   astrall_ros2/odom_node.
@@ -51,4 +51,4 @@ Expected ROS2 topics:
 - `/front/imu`: `sensor_msgs/msg/Imu`
 - `/rear/imu`: `sensor_msgs/msg/Imu`
 
-FAST-LIO consumes PointCloud2 plus IMU and outputs odom/TF. Nav2 consumes PointCloud2 through obstacle or voxel layers and outputs `/cmd_vel`. The Astrall SDK bridge receives `/cmd_vel` and forwards it to `AstrallMove(vx, vy, vyaw)`.
+FAST-LIO consumes PointCloud2 plus IMU and outputs odom/TF. Nav2 consumes PointCloud2 through obstacle or voxel layers and outputs `/cmd_vel`. The Astrall SDK bridge receives `/cmd_vel`, maps it to `Twist2D{vx, vy, w}`, and forwards it to the SDK adapter.

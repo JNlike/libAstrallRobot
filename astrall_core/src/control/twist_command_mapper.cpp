@@ -22,7 +22,7 @@ Twist2D clampTwist(const Twist2D& cmd, const VelocityLimits& limits) {
     return Twist2D{
         clampSymmetric(cmd.vx, limits.max_vx),
         clampSymmetric(cmd.vy, limits.max_vy),
-        clampSymmetric(cmd.w, limits.max_wz),
+        clampSymmetric(cmd.w, limits.max_w),
     };
 }
 
@@ -33,7 +33,7 @@ Twist2D mapRosTwistToSdkMove(const Twist2D& ros_cmd,
     return Twist2D{
         mapping.scale_vx * normalizedSign(mapping.sign_vx) * clamped.vx,
         mapping.scale_vy * normalizedSign(mapping.sign_vy) * clamped.vy,
-        mapping.scale_wz * normalizedSign(mapping.sign_wz) * clamped.w,
+        mapping.scale_w * normalizedSign(mapping.sign_w) * clamped.w,
     };
 }
 

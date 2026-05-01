@@ -32,8 +32,9 @@ public:
     bool requestControl();
     bool releaseControl();
 
-    bool move(double vx, double vy, double wz);
     bool move(const Twist2D& cmd);
+    // Compatibility convenience overload. Prefer move(const Twist2D&) for new code.
+    bool move(double vx, double vy, double w);
     bool stop();
 
     std::optional<AstrallImuData> latestImu() const;

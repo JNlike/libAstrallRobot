@@ -6,15 +6,15 @@ astrall_base_node:
 
     max_vx: 1.0
     max_vy: 0.5
-    max_wz: 1.0
+    max_w: 1.0
     cmd_vel_timeout_ms: 500
 
     scale_vx: 1.0
     scale_vy: 1.0
-    scale_wz: 1.0
+    scale_w: 1.0
     sign_vx: 1
     sign_vy: 1
-    sign_wz: 1
+    sign_w: 1
 
     publish_tf: false
     base_frame_id: "base_link"

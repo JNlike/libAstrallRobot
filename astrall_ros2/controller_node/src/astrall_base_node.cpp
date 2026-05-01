@@ -1,7 +1,5 @@
 #include <algorithm>
 #include <chrono>
-#include <cstdint>
-#include <iterator>
 #include <memory>
 #include <string>
 
@@ -13,8 +11,8 @@
 #include <std_msgs/msg/float32_multi_array.hpp>
 #include <std_msgs/msg/string.hpp>
 
+#include "astrall/backend/backend_factory.hpp"
 #include "astrall/control/twist_command_mapper.hpp"
-#include "astrall/sdk/astrall_sdk_wrapper.hpp"
 
 namespace {
 
@@ -24,10 +22,6 @@ astrall::Twist2D fromRosTwist(const geometry_msgs::msg::Twist& msg) {
     return astrall::Twist2D{msg.linear.x, msg.linear.y, msg.angular.z};
 }
 
-std::string resultToString(astrall::Result result) {
-    return std::to_string(astrall::to_underlying(result));
-}
-
 }  // namespace
 
 class AstrallBaseNode final : public rclcpp::Node {
@@ -35,34 +29,99 @@ public:
     AstrallBaseNode()
         : Node("astrall_base_node") {
         loadParameters();
-        configureSdk();
+        configureBackend();
         configureRosInterfaces();
     }
 
 private:
+    double declareCompatDouble(const std::string& name,
+                               const std::string& deprecated_name,
+                               double fallback) {
+        const double value = declare_parameter(name, fallback);
+        const double deprecated_value = declare_parameter(deprecated_name, value);
+        if (value == fallback && deprecated_value != value) {
+            RCLCPP_WARN(
+                get_logger(),
+                "Parameter '%s' is deprecated; use '%s' instead.",
+                deprecated_name.c_str(),
+                name.c_str());
+            return deprecated_value;
+        }
+        if (deprecated_value != value) {
+            RCLCPP_WARN(
+                get_logger(),
+                "Ignoring deprecated parameter '%s' because '%s' is set.",
+                deprecated_name.c_str(),
+                name.c_str());
+        }
+        return value;
+    }
+
+    int declareCompatInt(const std::string& name,
+                         const std::string& deprecated_name,
+                         int fallback) {
+        const int value = declare_parameter(name, fallback);
+        const int deprecated_value = declare_parameter(deprecated_name, value);
+        if (value == fallback && deprecated_value != value) {
+            RCLCPP_WARN(
+                get_logger(),
+                "Parameter '%s' is deprecated; use '%s' instead.",
+                deprecated_name.c_str(),
+                name.c_str());
+            return deprecated_value;
+        }
+        if (deprecated_value != value) {
+            RCLCPP_WARN(
+                get_logger(),
+                "Ignoring deprecated parameter '%s' because '%s' is set.",
+                deprecated_name.c_str(),
+                name.c_str());
+        }
+        return value;
+    }
+
     void loadParameters() {
+        backend_config_.kind = astrall::BackendKind::Real;
+
         limits_.max_vx = declare_parameter("max_vx", 1.0);
         limits_.max_vy = declare_parameter("max_vy", 0.5);
-        limits_.max_wz = declare_parameter("max_wz", 1.0);
+        limits_.max_w = declareCompatDouble("max_w", "max_wz", 1.0);
 
         mapping_.scale_vx = declare_parameter("scale_vx", 1.0);
         mapping_.scale_vy = declare_parameter("scale_vy", 1.0);
-        mapping_.scale_wz = declare_parameter("scale_wz", 1.0);
+        mapping_.scale_w = declareCompatDouble("scale_w", "scale_wz", 1.0);
         mapping_.sign_vx = declare_parameter("sign_vx", 1);
         mapping_.sign_vy = declare_parameter("sign_vy", 1);
-        mapping_.sign_wz = declare_parameter("sign_wz", 1);
+        mapping_.sign_w = declareCompatInt("sign_w", "sign_wz", 1);
 
         cmd_vel_timeout_ms_ = declare_parameter("cmd_vel_timeout_ms", 500);
-        sdk_config_.sdk_ip = declare_parameter("sdk_ip", std::string("10.18.0.200"));
-        sdk_config_.robot_ip = declare_parameter("robot_ip", std::string("10.18.0.100"));
+        backend_config_.real.sdk_ip = declare_parameter("sdk_ip", std::string("10.18.0.200"));
+        backend_config_.real.robot_ip = declare_parameter("robot_ip", std::string("10.18.0.100"));
+        robot_ip_ = backend_config_.real.robot_ip;
         control_mode_ = declare_parameter("control_mode", std::string("sdk"));
         publish_tf_ = declare_parameter("publish_tf", false);
         base_frame_id_ = declare_parameter("base_frame_id", std::string("base_link"));
         imu_frame_id_ = declare_parameter("imu_frame_id", std::string("imu_link"));
-        imu_frequency_hz_ = declare_parameter("imu_frequency_hz", 250);
-        sport_frequency_hz_ = declare_parameter("sport_frequency_hz", 250);
+        backend_config_.real.imu_frequency_hz = declare_parameter("imu_frequency_hz", 250);
+        backend_config_.real.sport_frequency_hz = declare_parameter("sport_frequency_hz", 250);
         publish_period_ms_ = declare_parameter("publish_period_ms", 20);
-        sdk_quaternion_order_ = declare_parameter("sdk_quaternion_order", std::string("xyzw"));
+        backend_config_.real.sdk_quaternion_order =
+            declare_parameter("sdk_quaternion_order", std::string("xyzw"));
+        backend_config_.real.request_control = sdkControlEnabled();
+
+        RCLCPP_WARN(
+            get_logger(),
+            "sdk_ip and robot_ip document the expected network and diagnostics only; "
+            "the current Astrall C API does not expose IP setters.");
+
+        if (control_mode_ != "sdk" && control_mode_ != "monitor") {
+            error_state_ = true;
+            status_text_ = "invalid_control_mode:" + control_mode_;
+            RCLCPP_ERROR(
+                get_logger(),
+                "Unsupported control_mode '%s'. Use 'sdk' or 'monitor'.",
+                control_mode_.c_str());
+        }
 
         if (publish_tf_) {
             RCLCPP_WARN(
@@ -72,30 +131,26 @@ private:
         }
     }
 
-    void configureSdk() {
-        if (!sdk_.init(sdk_config_)) {
-            error_state_ = true;
-            status_text_ = "sdk_init_failed:" + resultToString(sdk_.lastResult());
-            RCLCPP_ERROR(get_logger(), "Astrall SDK init failed: %s", status_text_.c_str());
+    void configureBackend() {
+        if (error_state_) {
             return;
         }
 
-        if (control_mode_ == "sdk" && !sdk_.requestControl()) {
+        try {
+            backend_ = astrall::createBackend(backend_config_);
+        } catch (const std::exception& ex) {
             error_state_ = true;
-            status_text_ = "request_control_failed:" + resultToString(sdk_.lastResult());
-            RCLCPP_ERROR(get_logger(), "Astrall SDK control request failed: %s", status_text_.c_str());
-            sdk_.stop();
+            status_text_ = std::string("backend_init_failed:") + ex.what();
+            RCLCPP_ERROR(get_logger(), "Astrall backend init failed: %s", ex.what());
             return;
         }
 
-        if (!sdk_.subscribeImu(imu_frequency_hz_)) {
-            RCLCPP_WARN(get_logger(), "IMU subscription failed: %s", resultToString(sdk_.lastResult()).c_str());
+        if (!sdkControlEnabled()) {
+            RCLCPP_WARN(
+                get_logger(),
+                "control_mode=monitor: /cmd_vel will be ignored and no backend motion commands will be sent.");
         }
-        if (!sdk_.subscribeSport(sport_frequency_hz_)) {
-            RCLCPP_WARN(get_logger(), "SPORT subscription failed: %s", resultToString(sdk_.lastResult()).c_str());
-        }
-
-        status_text_ = "ok";
+        status_text_ = sdkControlEnabled() ? "ok" : "ok_monitor";
     }
 
     void configureRosInterfaces() {
@@ -122,43 +177,49 @@ private:
         last_cmd_time_ = now();
         timed_out_stop_sent_ = false;
 
-        if (error_state_) {
-            sdk_.stop();
+        if (error_state_ || !backend_) {
+            stopBackendIfControlling();
             return;
         }
 
-        const astrall::Twist2D sdk_cmd =
+        if (!sdkControlEnabled()) {
+            status_text_ = "monitor_mode_cmd_vel_ignored";
+            return;
+        }
+
+        const astrall::Twist2D cmd =
             astrall::mapRosTwistToSdkMove(fromRosTwist(msg), limits_, mapping_);
-        if (!sdk_.move(sdk_cmd)) {
-            handleSdkCommandFailure("move_failed");
+        try {
+            backend_->sendVelocity(cmd);
+        } catch (const std::exception& ex) {
+            handleBackendCommandFailure(std::string("move_failed:") + ex.what());
         }
     }
 
     void safetyTick() {
-        const auto sdk_status = sdk_.latestSdkStatus();
-        if (sdk_status.has_value() && sdk_status->ctrlAuthority == 0) {
-            status_text_ = "no_control_authority";
-            sdk_.stop();
+        if (!backend_) {
             return;
         }
 
-        const auto system_status = sdk_.systemStatus();
-        if (system_status.has_value() &&
-            (system_status->sysStatus == ASTRALL_SYSTEM_CODE_ERROR ||
-             system_status->errorCode != ASTRALL_ERR_NONE)) {
+        const astrall::BackendStatus backend_status = backend_->status();
+        if (sdkControlEnabled() && !backend_status.control_authority) {
+            status_text_ = "no_control_authority";
+            stopBackendIfControlling();
+            return;
+        }
+
+        if (backend_status.error) {
             error_state_ = true;
-            status_text_ = "robot_system_error";
-            sdk_.stop();
+            status_text_ = backend_status.message.empty() ? "backend_error" : backend_status.message;
+            stopBackendIfControlling();
             return;
         }
 
         const auto elapsed_ms = (now() - last_cmd_time_).nanoseconds() / 1000000;
-        if (elapsed_ms > cmd_vel_timeout_ms_ && !timed_out_stop_sent_) {
+        if (sdkControlEnabled() && elapsed_ms > cmd_vel_timeout_ms_ && !timed_out_stop_sent_) {
             timed_out_stop_sent_ = true;
             status_text_ = "cmd_vel_timeout_stop";
-            if (!sdk_.stop()) {
-                handleSdkCommandFailure("timeout_stop_failed");
-            }
+            stopBackendIfControlling();
         }
     }
 
@@ -170,7 +231,11 @@ private:
     }
 
     void publishImu() {
-        const auto imu = sdk_.latestImu();
+        if (!backend_) {
+            return;
+        }
+
+        const auto imu = backend_->latestImu();
         if (!imu.has_value()) {
             return;
         }
@@ -178,40 +243,44 @@ private:
         sensor_msgs::msg::Imu msg;
         msg.header.stamp = now();
         msg.header.frame_id = imu_frame_id_;
-        if (sdk_quaternion_order_ == "wxyz") {
-            msg.orientation.w = imu->quaternion[0];
-            msg.orientation.x = imu->quaternion[1];
-            msg.orientation.y = imu->quaternion[2];
-            msg.orientation.z = imu->quaternion[3];
-        } else {
-            msg.orientation.x = imu->quaternion[0];
-            msg.orientation.y = imu->quaternion[1];
-            msg.orientation.z = imu->quaternion[2];
-            msg.orientation.w = imu->quaternion[3];
-        }
-        msg.angular_velocity.x = imu->gyroscope[0];
-        msg.angular_velocity.y = imu->gyroscope[1];
-        msg.angular_velocity.z = imu->gyroscope[2];
-        msg.linear_acceleration.x = imu->accelerometer[0];
-        msg.linear_acceleration.y = imu->accelerometer[1];
-        msg.linear_acceleration.z = imu->accelerometer[2];
+        msg.orientation.x = imu->quaternion_xyzw[0];
+        msg.orientation.y = imu->quaternion_xyzw[1];
+        msg.orientation.z = imu->quaternion_xyzw[2];
+        msg.orientation.w = imu->quaternion_xyzw[3];
+        msg.angular_velocity.x = imu->angular_velocity[0];
+        msg.angular_velocity.y = imu->angular_velocity[1];
+        msg.angular_velocity.z = imu->angular_velocity[2];
+        msg.linear_acceleration.x = imu->linear_acceleration[0];
+        msg.linear_acceleration.y = imu->linear_acceleration[1];
+        msg.linear_acceleration.z = imu->linear_acceleration[2];
         imu_pub_->publish(msg);
     }
 
     void publishWheelSpeeds() {
-        const auto sport = sdk_.latestSport();
-        if (!sport.has_value()) {
+        if (!backend_) {
+            return;
+        }
+
+        const auto speeds = backend_->latestWheelSpeeds();
+        if (!speeds.has_value()) {
             return;
         }
 
         std_msgs::msg::Float32MultiArray msg;
-        msg.data.assign(std::begin(sport->wheelSpeed), std::end(sport->wheelSpeed));
+        msg.data.assign(speeds->values.begin(), speeds->values.end());
         wheel_pub_->publish(msg);
     }
 
     void publishStatus() {
         std_msgs::msg::String msg;
         msg.data = status_text_;
+        if (backend_) {
+            const astrall::BackendStatus backend_status = backend_->status();
+            if (!backend_status.message.empty()) {
+                msg.data = backend_status.message;
+                status_text_ = backend_status.message;
+            }
+        }
         status_pub_->publish(msg);
     }
 
@@ -221,36 +290,51 @@ private:
 
         diagnostic_msgs::msg::DiagnosticStatus status;
         status.name = "astrall_base_driver";
-        status.hardware_id = sdk_config_.robot_ip;
+        status.hardware_id = robot_ip_;
         status.level = error_state_ ? diagnostic_msgs::msg::DiagnosticStatus::ERROR
                                     : diagnostic_msgs::msg::DiagnosticStatus::OK;
         status.message = status_text_;
+        if (backend_) {
+            const astrall::BackendStatus backend_status = backend_->status();
+            status.level = (error_state_ || backend_status.error)
+                               ? diagnostic_msgs::msg::DiagnosticStatus::ERROR
+                               : diagnostic_msgs::msg::DiagnosticStatus::OK;
+            status.message = backend_status.message.empty() ? status_text_ : backend_status.message;
+        }
         array.status.push_back(status);
         diagnostics_pub_->publish(array);
     }
 
-    void handleSdkCommandFailure(const std::string& prefix) {
-        const auto latest_status = sdk_.latestSdkStatus();
-        if (latest_status.has_value() && latest_status->ctrlAuthority == 0) {
-            status_text_ = "no_control_authority";
-            sdk_.stop();
+    void handleBackendCommandFailure(const std::string& message) {
+        error_state_ = true;
+        status_text_ = message;
+        stopBackendIfControlling();
+        RCLCPP_ERROR(get_logger(), "Astrall backend command failed: %s", status_text_.c_str());
+    }
+
+    void stopBackendIfControlling() {
+        if (!backend_ || !sdkControlEnabled()) {
             return;
         }
 
-        error_state_ = true;
-        status_text_ = prefix + ":" + resultToString(sdk_.lastResult());
-        sdk_.stop();
-        RCLCPP_ERROR(get_logger(), "Astrall SDK command failed: %s", status_text_.c_str());
+        try {
+            backend_->stop();
+        } catch (const std::exception& ex) {
+            status_text_ = std::string("stop_failed:") + ex.what();
+            RCLCPP_ERROR(get_logger(), "Astrall backend stop failed: %s", ex.what());
+        }
     }
 
-    astrall::AstrallSdkWrapper sdk_;
-    astrall::AstrallSdkConfig sdk_config_;
+    bool sdkControlEnabled() const {
+        return control_mode_ == "sdk";
+    }
+
+    std::shared_ptr<astrall::Backend> backend_;
+    astrall::BackendFactoryConfig backend_config_;
     astrall::VelocityLimits limits_;
     astrall::TwistMappingConfig mapping_;
 
     int cmd_vel_timeout_ms_ = 500;
-    int imu_frequency_hz_ = 250;
-    int sport_frequency_hz_ = 250;
     int publish_period_ms_ = 20;
     bool publish_tf_ = false;
     bool error_state_ = false;
@@ -258,7 +342,7 @@ private:
     std::string control_mode_ = "sdk";
     std::string base_frame_id_ = "base_link";
     std::string imu_frame_id_ = "imu_link";
-    std::string sdk_quaternion_order_ = "xyzw";
+    std::string robot_ip_ = "10.18.0.100";
     std::string status_text_ = "starting";
     rclcpp::Time last_cmd_time_;
 

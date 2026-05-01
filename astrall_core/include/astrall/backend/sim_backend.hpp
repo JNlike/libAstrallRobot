@@ -13,6 +13,10 @@ public:
     void sendVelocity(const Twist2D& cmd) override;
     Pose2D getCurrentPose() const override;
     void stop() override;
+    std::optional<BackendImuData> latestImu() const override;
+    std::optional<WheelSpeeds> latestWheelSpeeds() const override;
+    BackendStatus status() const override;
+    bool hasControlAuthority() const override;
 
     double dt() const;
     Twist2D lastCommand() const;

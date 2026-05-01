@@ -22,6 +22,28 @@ void SimBackend::stop() {
     last_cmd_ = Twist2D{};
 }
 
+std::optional<BackendImuData> SimBackend::latestImu() const {
+    return std::nullopt;
+}
+
+std::optional<WheelSpeeds> SimBackend::latestWheelSpeeds() const {
+    return std::nullopt;
+}
+
+BackendStatus SimBackend::status() const {
+    BackendStatus status;
+    status.initialized = true;
+    status.connected = true;
+    status.control_authority = true;
+    status.error = false;
+    status.message = "sim";
+    return status;
+}
+
+bool SimBackend::hasControlAuthority() const {
+    return true;
+}
+
 double SimBackend::dt() const {
     return dt_;
 }

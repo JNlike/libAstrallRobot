@@ -5,8 +5,16 @@ backend:
   sim:
     dt: 0.02
   real:
-    port: /dev/ttyUSB0
-    baudrate: 115200
+    # The current Astrall C API does not expose IP setters; these values document
+    # the expected network and are used for diagnostics.
+    sdk_ip: 10.18.0.200
+    robot_ip: 10.18.0.100
+    init_timeout_ms: 60000
+    command_timeout_ms: 20
+    imu_frequency_hz: 250
+    sport_frequency_hz: 250
+    sdk_quaternion_order: xyzw
+    request_control: true
 
 controller:
   max_v: 1.0
