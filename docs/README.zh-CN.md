@@ -1,8 +1,8 @@
 [English](../README.md) | [中文](README.zh-CN.md) | [日本語](README.ja.md) | [Français](README.fr.md) | [Deutsch](README.de.md)
 
-# Astrall 机器人运行时
+# 面向 Astrall 机器狗的机器人运行时
 
-Astrall 是一个面向工厂巡检机器人的极简现代 C++20 机器人运行时。核心运行时由 C++ 编写，Python 通过 `astrall` pybind11 模块调用它。
+本仓库提供一个面向工厂巡检机器人的极简现代 C++20 机器人运行时，运行目标是 Astrall 机器狗硬件。Astrall 是机器狗提供商/平台名称；本项目是围绕该平台构建的运行时和集成层。核心运行时由 C++ 编写，Python 通过 `astrall` pybind11 模块调用它。
 
 ## 仓库结构
 

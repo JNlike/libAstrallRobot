@@ -1,8 +1,8 @@
 [English](README.md) | [中文](docs/README.zh-CN.md) | [日本語](docs/README.ja.md) | [Français](docs/README.fr.md) | [Deutsch](docs/README.de.md)
 
-# Astrall Robot Runtime
+# Robot Runtime for Astrall Robot Dogs
 
-Astrall is a minimal modern C++20 robot runtime for factory inspection robots. The core runtime is written in C++, while Python calls it through the `astrall` pybind11 module.
+This repository provides a minimal modern C++20 robot runtime for factory inspection robots built on Astrall robot-dog hardware. Astrall is the robot provider/platform name; this project is the runtime and integration layer around that platform. The core runtime is written in C++, while Python calls it through the `astrall` pybind11 module.
 
 ## Repository Layout
 

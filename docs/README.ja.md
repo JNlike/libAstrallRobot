@@ -1,8 +1,8 @@
 [English](../README.md) | [中文](README.zh-CN.md) | [日本語](README.ja.md) | [Français](README.fr.md) | [Deutsch](README.de.md)
 
-# Astrall ロボットランタイム
+# Astrall ロボット犬向けロボットランタイム
 
-Astrall は、工場点検ロボット向けの最小構成でモダンな C++20 ロボットランタイムです。コアランタイムは C++ で実装され、Python は `astrall` pybind11 モジュールを通じて呼び出します。
+このリポジトリは、Astrall ロボット犬ハードウェア上で動作する工場点検ロボット向けの、最小構成でモダンな C++20 ロボットランタイムを提供します。Astrall はロボット提供元/プラットフォーム名であり、本プロジェクトはそのプラットフォーム向けのランタイムおよび統合レイヤーです。コアランタイムは C++ で実装され、Python は `astrall` pybind11 モジュールを通じて呼び出します。
 
 ## リポジトリ構成
 
