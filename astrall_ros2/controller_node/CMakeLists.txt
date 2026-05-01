@@ -34,13 +34,16 @@ if(NOT ASTRALL_ENABLE_SDK)
 endif()
 
 add_executable(astrall_base_node src/astrall_base_node.cpp)
-target_link_libraries(astrall_base_node PRIVATE astrall_core)
-ament_target_dependencies(astrall_base_node
-  diagnostic_msgs
-  geometry_msgs
-  rclcpp
-  sensor_msgs
-  std_msgs
+target_link_libraries(astrall_base_node
+  PRIVATE
+    astrall_core
+  PUBLIC
+    ${diagnostic_msgs_TARGETS}
+    ${geometry_msgs_TARGETS}
+    ${sensor_msgs_TARGETS}
+    ${std_msgs_TARGETS}
+    rclcpp::rclcpp
+    sensor_msgs::sensor_msgs_library
 )
 
 install(TARGETS astrall_base_node

@@ -13,7 +13,7 @@ endif()
 set(PYBIND11_FINDPYTHON ON)
 find_package(pybind11 REQUIRED)
 
-pybind11_add_module(astrall
+pybind11_add_module(astrall NO_EXTRAS
     src/astrall_bindings.cpp
     src/bind_common.cpp
     src/bind_backend.cpp
