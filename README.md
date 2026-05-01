@@ -1,3 +1,5 @@
+[English](README.md) | [中文](docs/README.zh-CN.md) | [日本語](docs/README.ja.md) | [Français](docs/README.fr.md) | [Deutsch](docs/README.de.md)
+
 # Astrall Robot Runtime
 
 Astrall is a minimal modern C++20 robot runtime for factory inspection robots. The core runtime is written in C++, while Python calls it through the `astrall` pybind11 module.

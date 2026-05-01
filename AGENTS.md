@@ -21,6 +21,13 @@
 - Python bindings expose snake_case names, for example `get_current_pose()` and `start_mission()`.
 - Use strong domain types such as `Twist2D`, `Pose2D`, and `Point2D`; avoid ambiguous tuple-style command APIs.
 
+## Documentation Localization
+
+- Whenever the root `README.md` is changed, update the matching localized documentation in the same change:
+  `docs/README.zh-CN.md`, `docs/README.ja.md`, `docs/README.fr.md`, and `docs/README.de.md`.
+- Keep the localized README files semantically aligned with the English source, including build commands, hardware boundaries, configuration defaults, and examples.
+- Do not leave localized README files stale when adding, removing, or substantially rewording root README content.
+
 ## Build Commands
 
 The target deployment platform is Linux. `ASTRALL_ENABLE_SDK` should default to `ON` when `CMAKE_SYSTEM_NAME` is `Linux`, and default to `OFF` otherwise because the bundled Astrall SDK library is a Linux `.so`.
