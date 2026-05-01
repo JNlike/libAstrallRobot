@@ -13,23 +13,25 @@ milliseconds timeoutFrom(std::uint32_t timeout_ms) {
 }  // namespace
 
 AstrallSdkWrapper::AstrallSdkWrapper() = default;
-AstrallSdkWrapper::~AstrallSdkWrapper() = default;
+AstrallSdkWrapper::~AstrallSdkWrapper() {
+    shutdown();
+}
 
 bool AstrallSdkWrapper::init(const AstrallSdkConfig& config) {
+    shutdown();
+
+    std::lock_guard<std::mutex> api_lock(api_mutex_);
     config_ = config;
 
     Callbacks callbacks;
     callbacks.sdk_status = [this](const AstrallSdkStatus& status) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(data_mutex_);
         latest_sdk_status_ = status;
     };
 
     auto client = std::make_unique<Client>();
     const Result result = client->init(callbacks, timeoutFrom(config_.init_timeout_ms));
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        last_result_ = result;
-    }
+    rememberResult(result);
 
     if (!succeeded(result)) {
         return false;
@@ -39,7 +41,38 @@ bool AstrallSdkWrapper::init(const AstrallSdkConfig& config) {
     return true;
 }
 
+void AstrallSdkWrapper::shutdown() noexcept {
+    try {
+        std::lock_guard<std::mutex> api_lock(api_mutex_);
+        if (!client_) {
+            return;
+        }
+
+        const bool controlling = hasControlAuthority();
+        if (controlling) {
+            rememberResult(client_->move(Velocity{}, timeoutFrom(config_.command_timeout_ms)));
+        }
+
+        auto noop_imu = [](const AstrallImuData&) {};
+        auto noop_sport = [](const AstrallSportData&) {};
+        auto noop_joystick = [](const AstrallJoystickData&) {};
+        rememberResult(client_->subscribe_imu(noop_imu, Frequency::close, timeoutFrom(config_.command_timeout_ms)));
+        rememberResult(client_->subscribe_sport(noop_sport, Frequency::close, timeoutFrom(config_.command_timeout_ms)));
+        rememberResult(client_->subscribe_joystick(noop_joystick, Frequency::close, timeoutFrom(config_.command_timeout_ms)));
+
+        if (controlling) {
+            rememberResult(client_->set_auth(Auth::joystick, timeoutFrom(config_.command_timeout_ms)));
+        }
+
+        client_->deinit();
+        client_.reset();
+    } catch (...) {
+        client_.reset();
+    }
+}
+
 bool AstrallSdkWrapper::requestControl() {
+    std::lock_guard<std::mutex> api_lock(api_mutex_);
     if (!client_) {
         return false;
     }
@@ -47,6 +80,7 @@ bool AstrallSdkWrapper::requestControl() {
 }
 
 bool AstrallSdkWrapper::releaseControl() {
+    std::lock_guard<std::mutex> api_lock(api_mutex_);
     if (!client_) {
         return false;
     }
@@ -58,13 +92,14 @@ bool AstrallSdkWrapper::move(double vx, double vy, double w) {
 }
 
 bool AstrallSdkWrapper::move(const Twist2D& cmd) {
+    std::lock_guard<std::mutex> api_lock(api_mutex_);
     if (!client_) {
         return false;
     }
 
     const auto sdk_status = latestSdkStatus();
     if (sdk_status.has_value() && sdk_status->ctrlAuthority == 0) {
-        stop();
+        rememberResult(client_->move(Velocity{}, timeoutFrom(config_.command_timeout_ms)));
         return false;
     }
 
@@ -78,6 +113,7 @@ bool AstrallSdkWrapper::move(const Twist2D& cmd) {
 }
 
 bool AstrallSdkWrapper::stop() {
+    std::lock_guard<std::mutex> api_lock(api_mutex_);
     if (!client_) {
         return false;
     }
@@ -86,26 +122,27 @@ bool AstrallSdkWrapper::stop() {
 }
 
 std::optional<AstrallImuData> AstrallSdkWrapper::latestImu() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(data_mutex_);
     return latest_imu_;
 }
 
 std::optional<AstrallSportData> AstrallSdkWrapper::latestSport() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(data_mutex_);
     return latest_sport_;
 }
 
 std::optional<AstrallJoystickData> AstrallSdkWrapper::latestJoystick() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(data_mutex_);
     return latest_joystick_;
 }
 
 std::optional<AstrallSdkStatus> AstrallSdkWrapper::latestSdkStatus() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(data_mutex_);
     return latest_sdk_status_;
 }
 
 std::optional<AstrallSystemStatus> AstrallSdkWrapper::systemStatus() const {
+    std::lock_guard<std::mutex> api_lock(api_mutex_);
     if (!client_) {
         return std::nullopt;
     }
@@ -120,13 +157,14 @@ std::optional<AstrallSystemStatus> AstrallSdkWrapper::systemStatus() const {
 }
 
 bool AstrallSdkWrapper::subscribeImu(int freq_hz) {
+    std::lock_guard<std::mutex> api_lock(api_mutex_);
     if (!client_) {
         return false;
     }
 
     return succeededAndRemember(client_->subscribe_imu(
         [this](const AstrallImuData& data) {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::lock_guard<std::mutex> lock(data_mutex_);
             latest_imu_ = data;
         },
         frequencyFromHz(freq_hz),
@@ -134,13 +172,14 @@ bool AstrallSdkWrapper::subscribeImu(int freq_hz) {
 }
 
 bool AstrallSdkWrapper::subscribeSport(int freq_hz) {
+    std::lock_guard<std::mutex> api_lock(api_mutex_);
     if (!client_) {
         return false;
     }
 
     return succeededAndRemember(client_->subscribe_sport(
         [this](const AstrallSportData& data) {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::lock_guard<std::mutex> lock(data_mutex_);
             latest_sport_ = data;
         },
         frequencyFromHz(freq_hz),
@@ -148,13 +187,14 @@ bool AstrallSdkWrapper::subscribeSport(int freq_hz) {
 }
 
 bool AstrallSdkWrapper::subscribeJoystick(int freq_hz) {
+    std::lock_guard<std::mutex> api_lock(api_mutex_);
     if (!client_) {
         return false;
     }
 
     return succeededAndRemember(client_->subscribe_joystick(
         [this](const AstrallJoystickData& data) {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::lock_guard<std::mutex> lock(data_mutex_);
             latest_joystick_ = data;
         },
         frequencyFromHz(freq_hz),
@@ -162,12 +202,12 @@ bool AstrallSdkWrapper::subscribeJoystick(int freq_hz) {
 }
 
 Result AstrallSdkWrapper::lastResult() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(data_mutex_);
     return last_result_;
 }
 
 bool AstrallSdkWrapper::hasControlAuthority() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(data_mutex_);
     return latest_sdk_status_.has_value() && latest_sdk_status_->ctrlAuthority != 0;
 }
 
@@ -190,9 +230,13 @@ Frequency AstrallSdkWrapper::frequencyFromHz(int freq_hz) {
     return Frequency::close;
 }
 
-bool AstrallSdkWrapper::succeededAndRemember(Result result) {
-    std::lock_guard<std::mutex> lock(mutex_);
+void AstrallSdkWrapper::rememberResult(Result result) {
+    std::lock_guard<std::mutex> lock(data_mutex_);
     last_result_ = result;
+}
+
+bool AstrallSdkWrapper::succeededAndRemember(Result result) {
+    rememberResult(result);
     return succeeded(result);
 }
 

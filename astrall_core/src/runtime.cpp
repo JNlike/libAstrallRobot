@@ -21,6 +21,33 @@ T getOr(const YAML::Node& node, const char* key, const T& fallback) {
     return node[key].as<T>();
 }
 
+std::shared_ptr<Planner> createPlanner(const YAML::Node& config) {
+    const std::string planner_type = getOr(config, "type", std::string("straight_line"));
+    if (planner_type != "straight_line") {
+        throw std::runtime_error("Unsupported planner type: " + planner_type);
+    }
+    return std::make_shared<StraightLinePlanner>(getOr(config, "waypoint_count", 20));
+}
+
+std::shared_ptr<Camera> createCamera(const YAML::Node& config) {
+    const std::string camera_type = getOr(config, "type", std::string("dummy"));
+    if (camera_type != "dummy") {
+        throw std::runtime_error("Unsupported camera type: " + camera_type);
+    }
+    return std::make_shared<DummyCamera>(
+        getOr(config, "width", 640),
+        getOr(config, "height", 480),
+        getOr(config, "channels", 3));
+}
+
+std::shared_ptr<Radar> createRadar(const YAML::Node& config) {
+    const std::string radar_type = getOr(config, "type", std::string("dummy"));
+    if (radar_type != "dummy") {
+        throw std::runtime_error("Unsupported radar type: " + radar_type);
+    }
+    return std::make_shared<DummyRadar>(getOr(config, "point_count", 1024));
+}
+
 }  // namespace
 
 std::shared_ptr<Runtime> Runtime::fromConfig(const std::string& config_path) {
@@ -50,31 +77,9 @@ std::shared_ptr<Runtime> Runtime::fromConfig(const std::string& config_path) {
         getOr(controller_config, "position_tolerance", 0.1),
         getOr(controller_config, "angle_tolerance", 0.1));
 
-    const YAML::Node planner_config = config["planner"];
-    const std::string planner_type = getOr(planner_config, "type", std::string("straight_line"));
-    if (planner_type != "straight_line") {
-        throw std::runtime_error("Unsupported planner type: " + planner_type);
-    }
-    runtime->planner_ = std::make_shared<StraightLinePlanner>(
-        getOr(planner_config, "waypoint_count", 20));
-
-    const YAML::Node camera_config = config["camera"];
-    const std::string camera_type = getOr(camera_config, "type", std::string("dummy"));
-    if (camera_type != "dummy") {
-        throw std::runtime_error("Unsupported camera type: " + camera_type);
-    }
-    runtime->camera_ = std::make_shared<DummyCamera>(
-        getOr(camera_config, "width", 640),
-        getOr(camera_config, "height", 480),
-        getOr(camera_config, "channels", 3));
-
-    const YAML::Node radar_config = config["radar"];
-    const std::string radar_type = getOr(radar_config, "type", std::string("dummy"));
-    if (radar_type != "dummy") {
-        throw std::runtime_error("Unsupported radar type: " + radar_type);
-    }
-    runtime->radar_ = std::make_shared<DummyRadar>(
-        getOr(radar_config, "point_count", 1024));
+    runtime->planner_ = createPlanner(config["planner"]);
+    runtime->camera_ = createCamera(config["camera"]);
+    runtime->radar_ = createRadar(config["radar"]);
 
     runtime->navigator_ = std::make_shared<Navigator>(
         runtime->planner_, runtime->controller_, runtime->backend_);

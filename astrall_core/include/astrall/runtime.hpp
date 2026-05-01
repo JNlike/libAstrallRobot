@@ -13,6 +13,10 @@
 
 namespace astrall {
 
+// Runtime assembles the core C++ objects for demos, simulation, Python task
+// entrypoints, and minimal non-ROS use. In production ROS2 deployments, Nav2
+// owns navigation and astrall_base_driver should use Backend directly rather
+// than constructing this full local navigation loop.
 class Runtime {
 public:
     static std::shared_ptr<Runtime> fromConfig(const std::string& config_path);

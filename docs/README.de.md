@@ -31,31 +31,42 @@ Designprinzipien:
 
 - Python ruft die Laufzeit auf.
 - C++ verwaltet Lebenszyklus und Hardwareabstraktionen.
-- `Runtime` besitzt und teilt die Systemobjekte.
+- `Runtime` besitzt und teilt die Systemobjekte für Demos, Simulation, Python-Aufgabeneinstiege und minimale Nicht-ROS-Nutzung.
 - `config.yaml` wählt konkrete Implementierungen aus.
+- `Planner`, `Controller`, `Navigator` und `StateMachine` sind Core-Komponenten für Demo/Simulation/minimale Runtime. Die Produktionsnavigation verwendet FAST-LIO/localization plus Nav2.
 - `Radar` ist nur eine Punktwolkenabstraktion für Simulation, Demo oder Mock. Produktions-LiDAR-Daten für FAST-LIO, Nav2 und RViz müssen aus einem Hersteller-SDK, einem UDP-Parser oder einem bestehenden ROS2-LiDAR-Treiber stammen, der `sensor_msgs/msg/PointCloud2` veröffentlicht.
 - Die Astrall-SDK-Schicht dient der Steuerung der Roboterbasis und der Statusüberbrückung: `AstrallMove`, IMU, SPORT, Joystick, RGB-Kamera, SDK-Status und Systemstatus.
+- `astrall_ros2/controller_node` wird als `astrall_base_driver` paketiert. Es erstellt und verwendet direkt `astrall_core::Backend`; es ist kein Nav2-Controller und sollte nicht die vollständige Core-`Runtime` konstruieren.
 - Python sollte auf der Aufgabenebene bleiben. Es sollte ROS2-Actions wie `NavigateToPose`/`FollowWaypoints` aufrufen und nicht direkt die geschlossene Regelung des Chassis ausführen.
 
 ## ROS2-Deployment-Form
 
 ```text
-Nav2 /cmd_vel
-  |
-  v
-astrall_ros2/controller_node --> astrall_core Backend --> RealBackend --> Astrall SDK
-  |
-  +--> /astrall/imu
-  +--> /astrall/wheel_speeds
-  +--> /astrall/status
-  +--> /diagnostics
+LiDAR ROS2 driver
+  -> PointCloud2
+  -> FAST-LIO/localization
+  -> odom + TF
+  -> Nav2
+  -> /cmd_vel
+  -> astrall_base_driver
+  -> astrall_core Backend
+  -> RealBackend
+  -> Astrall SDK
 
-astrall_ros2/radar_node -> /front/points_raw, /rear/points_raw
-FAST-LIO/localization --> odom + TF
-Nav2 costmaps ---------> PointCloud2 inputs
+astrall_base_driver veröffentlicht /astrall/imu, /astrall/wheel_speeds,
+/astrall/status und /diagnostics aus Backend-Telemetrie.
 ```
 
 Das vordere LiDAR wird unter `10.18.0.120` mit MSOP `6699`, DIFOP `7788` und IMU `6688` erwartet. Das hintere LiDAR wird unter `10.18.0.121` mit MSOP `6969`, DIFOP `7878` und IMU `6868` erwartet. Diese LiDAR-Streams sind keine Astrall-SDK-Abonnementtopics.
+
+## Implementierungsstatus
+
+| Bereich | Status |
+| --- | --- |
+| Core runtime | Implementiert für Simulation/Demo/minimale Runtime: `Backend`, `Controller`, `Planner`, `Navigator`, `StateMachine`, Dummy-Kamera und Dummy-Radar. |
+| Base driver | Implementiert als `astrall_base_driver`: abonniert `/cmd_vel`, sendet Geschwindigkeit über `Backend` an das SDK und veröffentlicht IMU, Radgeschwindigkeiten, Status und Diagnostics. |
+| Externe Pflichtkomponenten | Produktions-LiDAR-ROS2-Treiber oder UDP-Parser, FAST-LIO/localization, Nav2, maps/costmaps und validierte Sensorkalibrierung. |
+| Zukünftige Arbeit | Produktions-Kameratransport, umfassendere SDK-Fake-Tests, stärkere Runtime-Factories und deploymentspezifische Diagnostics. |
 
 ## Abhängigkeiten
 
@@ -154,6 +165,6 @@ pytest astrall_core\tests\smoke_test.py
 
 - Konstruieren Sie reale Hardwaregeräte nicht wiederholt aus Python. Bevorzugen Sie `Runtime.from_config()`, damit Hardware-Handles an einer Stelle geteilt und besessen werden.
 - C++-Geräteschnittstellen verwenden `ImageFrame` und `PointCloud`; Python `get_frame()` und `get_pointcloud()` geben der Einfachheit halber kopierte numpy-Arrays zurück. Ein zukünftiger Zero-Copy-Pfad sollte explizite Regeln für Besitz und Lebensdauer definieren.
-- `RealBackend` ist SDK-gestützt, wenn `ASTRALL_ENABLE_SDK=ON` ist. `backend: real` initialisiert das Astrall SDK und fordert standardmäßig die Kontrolle an; verwenden Sie dies nur in einer sicheren Hardwareumgebung.
+- `RealBackend` ist SDK-gestützt, wenn `ASTRALL_ENABLE_SDK=ON` ist. `backend: real` initialisiert das Astrall SDK und fordert standardmäßig die Kontrolle an; verwenden Sie dies nur in einer sicheren Hardwareumgebung. `getCurrentPose()` nutzt SDK-odom/yaw-Telemetrie für Demos und minimale Runtime-Pfade, nicht für Produktions-localization.
 - `sdk_ip` und `robot_ip` dokumentieren das erwartete Netzwerk und die Diagnose. Die aktuelle Astrall-C-API stellt keine IP-Setter bereit.
 - Siehe `docs/astrall_ros2_architecture.md` für ROS2 base-driver, LiDAR-driver, localization, Nav2 und den Testplan.

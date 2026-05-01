@@ -93,6 +93,7 @@ endif()
 
 if(ASTRALL_BUILD_TESTS)
     enable_testing()
+    find_package(Threads REQUIRED)
 
     add_executable(astrall_twist_mapper_test tests/test_twist_command_mapper.cpp)
     target_link_libraries(astrall_twist_mapper_test PRIVATE astrall_core)
@@ -105,4 +106,31 @@ if(ASTRALL_BUILD_TESTS)
     add_executable(astrall_backend_interface_test tests/test_backend_interface.cpp)
     target_link_libraries(astrall_backend_interface_test PRIVATE astrall_core)
     add_test(NAME astrall_backend_interface_test COMMAND astrall_backend_interface_test)
+
+    add_executable(astrall_sdk_wrapper_fake_test
+        tests/test_astrall_sdk_wrapper_fake.cpp
+        src/sdk/astrall_sdk_wrapper.cpp
+    )
+    target_compile_definitions(astrall_sdk_wrapper_fake_test PRIVATE ASTRALL_ENABLE_SDK=1)
+    target_include_directories(astrall_sdk_wrapper_fake_test
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/lib/astrall_sdk/include
+    )
+    target_link_libraries(astrall_sdk_wrapper_fake_test PRIVATE Threads::Threads)
+    add_test(NAME astrall_sdk_wrapper_fake_test COMMAND astrall_sdk_wrapper_fake_test)
+
+    add_executable(astrall_real_backend_fake_sdk_test
+        tests/test_real_backend_fake_sdk.cpp
+        src/backend/real_backend.cpp
+        src/sdk/astrall_sdk_wrapper.cpp
+    )
+    target_compile_definitions(astrall_real_backend_fake_sdk_test PRIVATE ASTRALL_ENABLE_SDK=1)
+    target_include_directories(astrall_real_backend_fake_sdk_test
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/lib/astrall_sdk/include
+    )
+    target_link_libraries(astrall_real_backend_fake_sdk_test PRIVATE Threads::Threads)
+    add_test(NAME astrall_real_backend_fake_sdk_test COMMAND astrall_real_backend_fake_sdk_test)
 endif()

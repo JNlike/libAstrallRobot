@@ -1,5 +1,6 @@
 #include "astrall/backend/real_backend.hpp"
 
+#include <chrono>
 #include <stdexcept>
 #include <utility>
 
@@ -12,6 +13,8 @@ namespace astrall {
 namespace {
 
 #if ASTRALL_ENABLE_SDK
+constexpr auto kSystemStatusCacheTtl = std::chrono::milliseconds(200);
+
 BackendImuData toCoreImuData(const AstrallImuData& data, const std::string& quaternion_order) {
     BackendImuData imu;
     imu.timestamp = data.timestamp;
@@ -60,7 +63,13 @@ RealBackend::RealBackend(std::string port, int baudrate)
     initializeSdk();
 }
 
-RealBackend::~RealBackend() = default;
+RealBackend::~RealBackend() {
+#if ASTRALL_ENABLE_SDK
+    if (sdk_) {
+        sdk_->shutdown();
+    }
+#endif
+}
 
 void RealBackend::sendVelocity(const Twist2D& cmd) {
 #if ASTRALL_ENABLE_SDK
@@ -74,6 +83,14 @@ void RealBackend::sendVelocity(const Twist2D& cmd) {
 }
 
 Pose2D RealBackend::getCurrentPose() const {
+    const auto imu = latestImu();
+    if (imu.has_value()) {
+        return Pose2D{
+            static_cast<double>(imu->odom_x),
+            static_cast<double>(imu->odom_y),
+            static_cast<double>(imu->yaw),
+        };
+    }
     return pose_;
 }
 
@@ -136,15 +153,7 @@ BackendStatus RealBackend::status() const {
         backend_status.control_authority = sdk_status->ctrlAuthority != 0;
     }
 
-    const auto system_status = sdk_->systemStatus();
-    if (system_status.has_value()) {
-        backend_status.system_code = static_cast<std::uint32_t>(system_status->sysStatus);
-        backend_status.error_code = static_cast<std::uint32_t>(system_status->errorCode);
-        backend_status.warning_code = static_cast<std::uint32_t>(system_status->warnCode);
-        backend_status.error =
-            system_status->sysStatus == ASTRALL_SYSTEM_CODE_ERROR ||
-            system_status->errorCode != ASTRALL_ERR_NONE;
-    }
+    applyCachedSystemStatus(backend_status);
 
     if (backend_status.error) {
         backend_status.message = "robot_system_error";
@@ -204,6 +213,47 @@ void RealBackend::initializeSdk() {
     initialized_ = true;
 #else
     throw std::runtime_error("RealBackend requires ASTRALL_ENABLE_SDK=ON");
+#endif
+}
+
+void RealBackend::applyCachedSystemStatus(BackendStatus& backend_status) const {
+#if ASTRALL_ENABLE_SDK
+    const auto now = std::chrono::steady_clock::now();
+    bool refresh = false;
+    {
+        std::lock_guard<std::mutex> lock(status_mutex_);
+        refresh = !has_cached_system_status_ ||
+                  now - last_system_status_refresh_ >= kSystemStatusCacheTtl;
+    }
+
+    if (refresh && sdk_) {
+        const auto system_status = sdk_->systemStatus();
+        if (system_status.has_value()) {
+            BackendStatus status_snapshot;
+            status_snapshot.system_code = static_cast<std::uint32_t>(system_status->sysStatus);
+            status_snapshot.error_code = static_cast<std::uint32_t>(system_status->errorCode);
+            status_snapshot.warning_code = static_cast<std::uint32_t>(system_status->warnCode);
+            status_snapshot.error =
+                system_status->sysStatus == ASTRALL_SYSTEM_CODE_ERROR ||
+                system_status->errorCode != ASTRALL_ERR_NONE;
+
+            std::lock_guard<std::mutex> lock(status_mutex_);
+            cached_system_status_ = status_snapshot;
+            has_cached_system_status_ = true;
+            last_system_status_refresh_ = now;
+        }
+    }
+
+    std::lock_guard<std::mutex> lock(status_mutex_);
+    if (!has_cached_system_status_) {
+        return;
+    }
+    backend_status.system_code = cached_system_status_.system_code;
+    backend_status.error_code = cached_system_status_.error_code;
+    backend_status.warning_code = cached_system_status_.warning_code;
+    backend_status.error = cached_system_status_.error;
+#else
+    (void)backend_status;
 #endif
 }
 

@@ -10,6 +10,9 @@
 
 namespace astrall {
 
+// Connects the core Planner and Controller for demo/sim/minimal runtime goals.
+// It is not a Nav2 replacement; production route execution should stay in ROS2
+// actions and Nav2, which then publish /cmd_vel to the base driver.
 class Navigator {
 public:
     Navigator(std::shared_ptr<Planner> planner,

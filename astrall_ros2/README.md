@@ -2,6 +2,23 @@
 
 This directory is the ROS2 adaptation layer. It should not absorb the core C++ runtime or the pybind11 module.
 
+Production navigation is fixed to this responsibility chain:
+
+```text
+LiDAR ROS2 driver
+  -> PointCloud2
+  -> FAST-LIO/localization
+  -> odom + TF
+  -> Nav2
+  -> /cmd_vel
+  -> astrall_base_driver
+  -> astrall_core Backend
+  -> RealBackend
+  -> Astrall SDK
+```
+
+Core `Planner`, `Controller`, `Navigator`, and `StateMachine` remain useful for demos, simulation, and minimal non-ROS runtime paths. They are not Nav2 replacements.
+
 ## Conceptual Nodes
 
 ```text
@@ -16,9 +33,10 @@ CameraNode
   ROS2 camera adapter when production camera transport is added.
 
 ControllerNode
-  astrall_ros2/controller_node, packaged as astrall_base_driver for now.
+  astrall_ros2/controller_node, packaged as astrall_base_driver.
   Subscribes /cmd_vel, clamps/maps Twist, sends commands through astrall_core Backend,
   and publishes Backend IMU, wheel speeds, robot status, and diagnostics.
+  It is a base driver, not a Nav2 controller, and it should not construct Runtime.
 
 OdomNode
   astrall_ros2/odom_node.
@@ -52,3 +70,12 @@ Expected ROS2 topics:
 - `/rear/imu`: `sensor_msgs/msg/Imu`
 
 FAST-LIO consumes PointCloud2 plus IMU and outputs odom/TF. Nav2 consumes PointCloud2 through obstacle or voxel layers and outputs `/cmd_vel`. The Astrall SDK bridge receives `/cmd_vel`, maps it to `Twist2D{vx, vy, w}`, and forwards it to the SDK adapter.
+
+## Implementation Status
+
+| Area | Status |
+| --- | --- |
+| Base driver | Implemented as `astrall_base_driver`: `/cmd_vel` input, Backend velocity output, IMU/wheel/status/diagnostics publishers, monitor mode, timeout stop, and no-control-authority guard. |
+| LiDAR boundary | Documented network and topics. Production PointCloud2 must come from an external ROS2 driver, vendor SDK, or UDP parser. |
+| Localization/navigation | External: FAST-LIO or equivalent estimator plus Nav2. This layer does not publish odom localization TF. |
+| Future work | Production camera transport, deployment launch composition, and ROS2 integration tests with fake Backend/SDK. |

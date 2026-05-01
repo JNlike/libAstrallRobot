@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <diagnostic_msgs/msg/diagnostic_array.hpp>
@@ -140,8 +141,8 @@ private:
             backend_ = astrall::createBackend(backend_config_);
         } catch (const std::exception& ex) {
             error_state_ = true;
-            status_text_ = std::string("backend_init_failed:") + ex.what();
-            RCLCPP_ERROR(get_logger(), "Astrall backend init failed: %s", ex.what());
+            status_text_ = std::string("base_driver_backend_init_failed:") + ex.what();
+            RCLCPP_ERROR(get_logger(), "Astrall base driver backend init failed: %s", ex.what());
             return;
         }
 
@@ -178,7 +179,6 @@ private:
         timed_out_stop_sent_ = false;
 
         if (error_state_ || !backend_) {
-            stopBackendIfControlling();
             return;
         }
 
@@ -187,12 +187,26 @@ private:
             return;
         }
 
+        const auto backend_status = backendStatusSnapshot();
+        if (backend_status.has_value()) {
+            if (backend_status->error) {
+                handleBackendCommandFailure(
+                    backend_status->message.empty() ? "backend_error" : backend_status->message,
+                    backend_status);
+                return;
+            }
+            if (!backend_status->control_authority) {
+                status_text_ = "no_control_authority";
+                return;
+            }
+        }
+
         const astrall::Twist2D cmd =
             astrall::mapRosTwistToSdkMove(fromRosTwist(msg), limits_, mapping_);
         try {
             backend_->sendVelocity(cmd);
         } catch (const std::exception& ex) {
-            handleBackendCommandFailure(std::string("move_failed:") + ex.what());
+            handleBackendCommandFailure(std::string("move_failed:") + ex.what(), backend_status);
         }
     }
 
@@ -201,17 +215,20 @@ private:
             return;
         }
 
-        const astrall::BackendStatus backend_status = backend_->status();
-        if (sdkControlEnabled() && !backend_status.control_authority) {
-            status_text_ = "no_control_authority";
-            stopBackendIfControlling();
+        const auto backend_status = backendStatusSnapshot();
+        if (!backend_status.has_value()) {
             return;
         }
 
-        if (backend_status.error) {
+        if (sdkControlEnabled() && !backend_status->control_authority) {
+            status_text_ = "no_control_authority";
+            return;
+        }
+
+        if (backend_status->error) {
             error_state_ = true;
-            status_text_ = backend_status.message.empty() ? "backend_error" : backend_status.message;
-            stopBackendIfControlling();
+            status_text_ = backend_status->message.empty() ? "backend_error" : backend_status->message;
+            stopBackendIfControlling(backend_status);
             return;
         }
 
@@ -219,15 +236,16 @@ private:
         if (sdkControlEnabled() && elapsed_ms > cmd_vel_timeout_ms_ && !timed_out_stop_sent_) {
             timed_out_stop_sent_ = true;
             status_text_ = "cmd_vel_timeout_stop";
-            stopBackendIfControlling();
+            stopBackendIfControlling(backend_status);
         }
     }
 
     void publishTick() {
         publishImu();
         publishWheelSpeeds();
-        publishStatus();
-        publishDiagnostics();
+        const auto backend_status = backendStatusSnapshot();
+        publishStatus(backend_status);
+        publishDiagnostics(backend_status);
     }
 
     void publishImu() {
@@ -271,20 +289,19 @@ private:
         wheel_pub_->publish(msg);
     }
 
-    void publishStatus() {
+    void publishStatus(const std::optional<astrall::BackendStatus>& backend_status) {
         std_msgs::msg::String msg;
         msg.data = status_text_;
-        if (backend_) {
-            const astrall::BackendStatus backend_status = backend_->status();
-            if (!backend_status.message.empty()) {
-                msg.data = backend_status.message;
-                status_text_ = backend_status.message;
+        if (backend_status.has_value()) {
+            if (!backend_status->message.empty()) {
+                msg.data = backend_status->message;
+                status_text_ = backend_status->message;
             }
         }
         status_pub_->publish(msg);
     }
 
-    void publishDiagnostics() {
+    void publishDiagnostics(const std::optional<astrall::BackendStatus>& backend_status) {
         diagnostic_msgs::msg::DiagnosticArray array;
         array.header.stamp = now();
 
@@ -294,26 +311,38 @@ private:
         status.level = error_state_ ? diagnostic_msgs::msg::DiagnosticStatus::ERROR
                                     : diagnostic_msgs::msg::DiagnosticStatus::OK;
         status.message = status_text_;
-        if (backend_) {
-            const astrall::BackendStatus backend_status = backend_->status();
-            status.level = (error_state_ || backend_status.error)
+        if (backend_status.has_value()) {
+            status.level = (error_state_ || backend_status->error)
                                ? diagnostic_msgs::msg::DiagnosticStatus::ERROR
                                : diagnostic_msgs::msg::DiagnosticStatus::OK;
-            status.message = backend_status.message.empty() ? status_text_ : backend_status.message;
+            status.message = backend_status->message.empty() ? status_text_ : backend_status->message;
         }
         array.status.push_back(status);
         diagnostics_pub_->publish(array);
     }
 
-    void handleBackendCommandFailure(const std::string& message) {
-        error_state_ = true;
-        status_text_ = message;
-        stopBackendIfControlling();
-        RCLCPP_ERROR(get_logger(), "Astrall backend command failed: %s", status_text_.c_str());
+    std::optional<astrall::BackendStatus> backendStatusSnapshot() {
+        if (!backend_) {
+            return std::nullopt;
+        }
+
+        return backend_->status();
     }
 
-    void stopBackendIfControlling() {
+    void handleBackendCommandFailure(
+        const std::string& message,
+        const std::optional<astrall::BackendStatus>& backend_status) {
+        error_state_ = true;
+        status_text_ = message;
+        stopBackendIfControlling(backend_status);
+        RCLCPP_ERROR(get_logger(), "Astrall base driver command failed: %s", status_text_.c_str());
+    }
+
+    void stopBackendIfControlling(const std::optional<astrall::BackendStatus>& backend_status) {
         if (!backend_ || !sdkControlEnabled()) {
+            return;
+        }
+        if (!backend_status.has_value() || !backend_status->control_authority) {
             return;
         }
 
@@ -321,7 +350,7 @@ private:
             backend_->stop();
         } catch (const std::exception& ex) {
             status_text_ = std::string("stop_failed:") + ex.what();
-            RCLCPP_ERROR(get_logger(), "Astrall backend stop failed: %s", ex.what());
+            RCLCPP_ERROR(get_logger(), "Astrall base driver stop failed: %s", ex.what());
         }
     }
 

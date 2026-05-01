@@ -6,6 +6,9 @@
 
 namespace astrall {
 
+// Minimal core motion controller used by demos/simulation/runtime missions.
+// Production ROS2 navigation should use Nav2's controller stack and send
+// /cmd_vel to astrall_base_driver instead of running chassis closed loop here.
 class Controller {
 public:
     explicit Controller(std::shared_ptr<Backend> backend);

@@ -29,6 +29,8 @@ public:
     AstrallSdkWrapper& operator=(const AstrallSdkWrapper&) = delete;
 
     bool init(const AstrallSdkConfig& config);
+    void shutdown() noexcept;
+
     bool requestControl();
     bool releaseControl();
 
@@ -52,11 +54,13 @@ public:
 
 private:
     static Frequency frequencyFromHz(int freq_hz);
+    void rememberResult(Result result);
     bool succeededAndRemember(Result result);
 
     AstrallSdkConfig config_;
     std::unique_ptr<Client> client_;
-    mutable std::mutex mutex_;
+    mutable std::mutex api_mutex_;
+    mutable std::mutex data_mutex_;
     std::optional<AstrallImuData> latest_imu_;
     std::optional<AstrallSportData> latest_sport_;
     std::optional<AstrallJoystickData> latest_joystick_;

@@ -1,7 +1,9 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "astrall/backend/backend.hpp"
@@ -23,6 +25,10 @@ struct RealBackendConfig {
     bool request_control = true;
 };
 
+// SDK-backed chassis backend. It owns the Astrall SDK lifecycle and exposes
+// base telemetry/control to core and ROS2 callers. The pose returned here is
+// SDK odometry telemetry for demos/minimal runtime paths; production navigation
+// should use ROS2 localization odom/TF from FAST-LIO or another estimator.
 class RealBackend final : public Backend {
 public:
     explicit RealBackend(const RealBackendConfig& config);
@@ -46,12 +52,17 @@ public:
 
 private:
     void initializeSdk();
+    void applyCachedSystemStatus(BackendStatus& backend_status) const;
 
     RealBackendConfig config_;
     std::string port_;
     int baudrate_ = 115200;
     Pose2D pose_;
     bool initialized_ = false;
+    mutable std::mutex status_mutex_;
+    mutable BackendStatus cached_system_status_;
+    mutable bool has_cached_system_status_ = false;
+    mutable std::chrono::steady_clock::time_point last_system_status_refresh_{};
 #if ASTRALL_ENABLE_SDK
     std::unique_ptr<AstrallSdkWrapper> sdk_;
 #endif
