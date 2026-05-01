@@ -1,86 +1,159 @@
 [English](../README.md) | [中文](README.zh-CN.md) | [日本語](README.ja.md) | [Français](README.fr.md) | [Deutsch](README.de.md)
 
-# Astrall RobotDog Cpp
+# Astrall Robot Runtime
 
-Ein C++17-Demoprojekt zur Steuerung eines Astrall-Roboterhundes mit dem Astrall SDK.
+Astrall ist eine minimale, moderne C++20-Robotik-Laufzeitumgebung für Inspektionsroboter in Fabriken. Die zentrale Laufzeit ist in C++ geschrieben, während Python sie über das pybind11-Modul `astrall` aufruft.
 
-Dieses Projekt zeigt, wie das SDK initialisiert, Roboterdaten abonniert, Geräte- und Energiezustände gelesen, Heartbeat-Nachrichten gesendet und Bewegungen per Tastatur gesteuert werden.
-
-## Funktionen
-
-- C++-Projektstruktur auf Basis von CMake.
-- Astrall-SDK-Integration über `lib/astrall_sdk`.
-- Tastatursteuerung für Sportmodi, Bewegung, Autorisierung und Beleuchtung.
-- Abonnement von IMU- und Bewegungsdaten.
-- Periodische Ausgabe von Heartbeat, Geräteinformationen, Systemstatus, Sportstatus und Batteriestatus.
-- Automatisches Kopieren der SDK-Runtime-Bibliotheken nach dem Build.
-
-## Projektstruktur
+## Repository-Struktur
 
 ```text
-.
-├── CMakeLists.txt
-├── src/
-│   ├── main.cpp
-│   ├── keyboard.cpp
-│   └── keyboard.h
-├── lib/
-│   └── astrall_sdk/
-│       ├── include/
-│       ├── x86-64/
-│       └── arm64/
-└── docs/
+astrall_core/
+  include/astrall/
+  src/
+  configs/
+  examples/
+  tests/
+  lib/astrall_sdk/
+
+astrall_py/
+  src/
+
+astrall_ros2/
+  radar_node/
+  camera_node/
+  controller_node/
+  odom_node/
+  tf_node/
+  scripts/
 ```
 
-## Voraussetzungen
+Designprinzipien:
 
-- Linux-Umgebung
-- CMake 3.10 oder neuer
-- C++17-kompatibler Compiler
-- POSIX-Thread-Unterstützung
-- Astrall-Roboterhund und kompatible Astrall-SDK-Runtime
+- Python ruft die Laufzeit auf.
+- C++ verwaltet Lebenszyklus und Hardwareabstraktionen.
+- `Runtime` besitzt und teilt die Systemobjekte.
+- `config.yaml` wählt konkrete Implementierungen aus.
+- `Radar` ist nur eine Punktwolkenabstraktion für Simulation, Demo oder Mock. Produktions-LiDAR-Daten für FAST-LIO, Nav2 und RViz müssen aus einem Hersteller-SDK, einem UDP-Parser oder einem bestehenden ROS2-LiDAR-Treiber stammen, der `sensor_msgs/msg/PointCloud2` veröffentlicht.
+- Die Astrall-SDK-Schicht dient der Steuerung der Roboterbasis und der Statusüberbrückung: `AstrallMove`, IMU, SPORT, Joystick, RGB-Kamera, SDK-Status und Systemstatus.
+- Python sollte auf der Aufgabenebene bleiben. Es sollte ROS2-Actions wie `NavigateToPose`/`FollowWaypoints` aufrufen und nicht direkt die geschlossene Regelung des Chassis ausführen.
+
+## ROS2-Deployment-Form
+
+```text
+Nav2 /cmd_vel
+  |
+  v
+astrall_ros2/controller_node --> astrall_core Backend --> RealBackend --> Astrall SDK
+  |
+  +--> /astrall/imu
+  +--> /astrall/wheel_speeds
+  +--> /astrall/status
+  +--> /diagnostics
+
+astrall_ros2/radar_node -> /front/points_raw, /rear/points_raw
+FAST-LIO/localization --> odom + TF
+Nav2 costmaps ---------> PointCloud2 inputs
+```
+
+Das vordere LiDAR wird unter `10.18.0.120` mit MSOP `6699`, DIFOP `7788` und IMU `6688` erwartet. Das hintere LiDAR wird unter `10.18.0.121` mit MSOP `6969`, DIFOP `7878` und IMU `6868` erwartet. Diese LiDAR-Streams sind keine Astrall-SDK-Abonnementtopics.
+
+## Abhängigkeiten
+
+- C++20-Compiler
+- CMake 3.20+
+- Python 3
+- pybind11
+- yaml-cpp
+- numpy für Python-Tests und Demos
+
+Ubuntu:
+
+```bash
+sudo apt install cmake g++ pybind11-dev libyaml-cpp-dev python3-numpy
+```
+
+Alternative Paketmanager wie vcpkg oder conda können ebenfalls `pybind11` und `yaml-cpp` bereitstellen.
+
+Unter Windows verwenden Sie einen Compiler und ein `yaml-cpp`-Paket, die mit derselben ABI gebaut wurden. Kombinieren Sie zum Beispiel ein mit MSVC gebautes `yaml-cpp` mit MSVC oder ein mit MinGW gebautes `yaml-cpp` mit MinGW.
 
 ## Build
 
-```bash
-cmake -S . -B build
-cmake --build build
-```
-
-Die ausführbare Datei wird als `sdk_demo` erzeugt. Die erforderlichen Astrall-SDK-Runtime-Bibliotheken werden nach dem Build in das Verzeichnis der ausführbaren Datei kopiert.
-
-## Ausführen
+`ASTRALL_ENABLE_SDK` ist unter Linux standardmäßig `ON` und auf anderen Plattformen standardmäßig `OFF`. Die mitgelieferte SDK-Bibliothek ist eine Linux-`.so`, daher können lokale Nicht-Linux-Builds den Simulations-/Demo-Core weiterhin ohne SDK-Wrapper kompilieren.
 
 ```bash
-./build/sdk_demo
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
 ```
 
-Führen Sie das Programm in einem Terminal aus, das mit der Roboterumgebung verbunden ist. Die Demo liest Tastatureingaben direkt von der Standardeingabe.
+## Python-Nutzung
 
-## Tastatursteuerung
+Setzen Sie `PYTHONPATH` auf das Verzeichnis, das die kompilierte `astrall`-Erweiterung enthält.
 
-| Taste | Aktion |
-| --- | --- |
-| `1` | In den Damping-Modus wechseln |
-| `2` | In den Fixed-Stand-Modus wechseln |
-| `3` | In den Fixed-Down-Modus wechseln |
-| `4` | In den Move-Modus wechseln |
-| `5` | Automatisches Laden starten |
-| `6` | Laden beenden |
-| `9` | SDK-Steuerberechtigung anfordern |
-| `0` | Bewegung stoppen |
-| `w` / `s` | Vorwärtsgeschwindigkeit erhöhen / verringern |
-| `a` / `d` | Seitliche Geschwindigkeit erhöhen / verringern |
-| `q` / `e` | Gierrate erhöhen / verringern |
-| `n` | Licht einschalten |
-| `o` | Licht ausschalten |
+Linux/macOS-Beispiel mit Single-Config:
 
-Bewegungstasten wirken nur, wenn sich der Roboter im Move-Modus befindet.
+```bash
+PYTHONPATH=build/astrall_py python astrall_core/examples/python_demo.py
+```
+
+Windows/Nicht-Linux-Beispiel mit Multi-Config:
+
+```powershell
+$env:PYTHONPATH="build\astrall_py\Release"
+python astrall_core\examples\python_demo.py
+```
+
+Python-API-Beispiel:
+
+```python
+import astrall as al
+
+rt = al.from_config("astrall_core/configs/robot.yaml")
+
+img = rt.camera().get_frame()
+cloud = rt.radar().get_pointcloud()  # demo/mock cloud, not production LiDAR
+
+sm = rt.state_machine()
+sm.start_mission([
+    al.Point2D(1.0, 0.0),
+    al.Point2D(2.0, 1.0),
+])
+
+while sm.running():
+    sm.update()
+```
+
+## C++-Demo
+
+```bash
+cmake --build build --target astrall_cpp_demo --config Release
+./build/astrall_core/astrall_cpp_demo
+```
+
+Bei Windows-Multi-Config-Generatoren:
+
+```powershell
+.\build\astrall_core\Release\astrall_cpp_demo.exe
+```
+
+## Tests
+
+Nach dem Build der Python-Erweiterung:
+
+```bash
+PYTHONPATH=build/astrall_py pytest astrall_core/tests/smoke_test.py
+```
+
+Unter Windows:
+
+```powershell
+$env:PYTHONPATH="build\astrall_py\Release"
+pytest astrall_core\tests\smoke_test.py
+```
 
 ## Hinweise
 
-Verwenden Sie diese Demo vorsichtig in einem sicheren, offenen Bereich. Stellen Sie vor dem Aktivieren der Bewegung sicher, dass der Roboter über SDK-Steuerberechtigung verfügt und genügend Platz vorhanden ist.
-
-## Lizenz
-
-Siehe [LICENSE](../LICENSE).
+- Konstruieren Sie reale Hardwaregeräte nicht wiederholt aus Python. Bevorzugen Sie `Runtime.from_config()`, damit Hardware-Handles an einer Stelle geteilt und besessen werden.
+- C++-Geräteschnittstellen verwenden `ImageFrame` und `PointCloud`; Python `get_frame()` und `get_pointcloud()` geben der Einfachheit halber kopierte numpy-Arrays zurück. Ein zukünftiger Zero-Copy-Pfad sollte explizite Regeln für Besitz und Lebensdauer definieren.
+- `RealBackend` ist SDK-gestützt, wenn `ASTRALL_ENABLE_SDK=ON` ist. `backend: real` initialisiert das Astrall SDK und fordert standardmäßig die Kontrolle an; verwenden Sie dies nur in einer sicheren Hardwareumgebung.
+- `sdk_ip` und `robot_ip` dokumentieren das erwartete Netzwerk und die Diagnose. Die aktuelle Astrall-C-API stellt keine IP-Setter bereit.
+- Siehe `docs/astrall_ros2_architecture.md` für ROS2 base-driver, LiDAR-driver, localization, Nav2 und den Testplan.
